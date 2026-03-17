@@ -1,0 +1,320 @@
+"""Agent interfaces for the Roundtable Meeting System V1."""
+
+import logging
+from typing import Any, Dict, Optional
+
+import httpx
+from openai import AsyncOpenAI
+
+from config import LLMProviderConfig
+from models import AgentMessage, RoundScore, RoundSummary, FinalReport, FinalScore
+from parser import parse_json_response, safe_parse_agent_output
+from prompts import (
+    MODERATOR_OPENING_PROMPT,
+    MODERATOR_SUMMARY_PROMPT,
+    MODERATOR_FINAL_PROMPT,
+    EXPERT_ROUND1_PROMPT,
+    EXPERT_ROUND2_PROMPT,
+    EXPERT_ROUND3_PROMPT,
+    EXPERT_ROUND4_PROMPT,
+)
+
+logger = logging.getLogger(__name__)
+
+MAX_RETRIES = 1
+
+
+def create_client(provider: LLMProviderConfig) -> AsyncOpenAI:
+    """Create an AsyncOpenAI client from a provider config."""
+    kwargs: dict = {"api_key": provider.api_key}
+    if provider.base_url:
+        kwargs["base_url"] = provider.base_url
+    if provider.timeout:
+        kwargs["timeout"] = httpx.Timeout(provider.timeout, connect=30.0)
+    return AsyncOpenAI(**kwargs)
+
+
+class BaseMeetingAgent:
+    """Base class for all meeting agents."""
+
+    def __init__(
+        self,
+        name: str,
+        role_label: str,
+        system_prompt: str,
+        provider: LLMProviderConfig,
+    ):
+        self.name = name
+        self.role_label = role_label
+        self.system_prompt = system_prompt
+        self.provider = provider
+        self.client = create_client(provider)
+        self.model = provider.model
+
+    async def _call_llm(self, user_prompt: str) -> str:
+        """Call the LLM and return the raw text response."""
+        for attempt in range(MAX_RETRIES + 1):
+            try:
+                response = await self.client.chat.completions.create(
+                    model=self.model,
+                    messages=[
+                        {"role": "system", "content": self.system_prompt},
+                        {"role": "user", "content": user_prompt},
+                    ],
+                    temperature=0.7,
+                )
+                return response.choices[0].message.content or ""
+            except Exception as e:
+                logger.warning(
+                    "[%s] LLM call attempt %d failed (%s/%s): %s",
+                    self.name, attempt + 1, self.provider.name, self.model, e,
+                )
+                if attempt == MAX_RETRIES:
+                    raise
+        return ""
+
+    async def speak(
+        self, round_index: int, task_prompt: str, context: dict
+    ) -> AgentMessage:
+        """Generate a speech for the given round."""
+        raw_text = await self._call_llm(task_prompt)
+        content = safe_parse_agent_output(raw_text, list(context.get("expected_keys", [])))
+        return AgentMessage(
+            round_index=round_index,
+            agent_name=self.name,
+            content=content,
+            raw_text=raw_text,
+        )
+
+
+class ExpertAgent(BaseMeetingAgent):
+    """An expert agent participating in the roundtable."""
+
+    def __init__(
+        self,
+        name: str,
+        role_label: str,
+        provider: LLMProviderConfig,
+    ):
+        self.base_name = name
+        self.style_label = role_label
+        super().__init__(name, role_label, "", provider)
+        self._refresh_system_prompt()
+
+    def _refresh_system_prompt(self):
+        self.system_prompt = (
+            f"你是一位圆桌会议专家，当前在本议题中的对外头衔是 [{self.name}]，"
+            f"你的基础思考风格是 [{self.style_label}]。"
+            "请始终保持该思考风格参与讨论，提出建设性、有深度的观点，"
+            "并在表述身份时以当前对外头衔为准。"
+        )
+
+    def retitle(self, title: str):
+        title = title.strip()
+        if not title or title == self.name:
+            return
+        self.name = title
+        self._refresh_system_prompt()
+
+    @property
+    def opening_assignment_label(self) -> str:
+        return f"{self.base_name}（{self.style_label}）"
+
+    async def speak_round1(self, topic: str, opening: str) -> AgentMessage:
+        prompt = EXPERT_ROUND1_PROMPT.format(
+            role_label=self.role_label, topic=topic, opening=opening
+        )
+        raw = await self._call_llm(prompt)
+        content = safe_parse_agent_output(
+            raw, ["core_position", "key_points", "main_risks", "initial_suggestion"]
+        )
+        return AgentMessage(round_index=1, agent_name=self.name, content=content, raw_text=raw)
+
+    async def speak_round2(
+        self, topic: str, round1_summary: str, moderator_summary: str
+    ) -> AgentMessage:
+        prompt = EXPERT_ROUND2_PROMPT.format(
+            role_label=self.role_label,
+            topic=topic,
+            round1_summary=round1_summary,
+            moderator_summary=moderator_summary,
+        )
+        raw = await self._call_llm(prompt)
+        content = safe_parse_agent_output(
+            raw, ["new_points", "attacks", "preserved_points"]
+        )
+        return AgentMessage(round_index=2, agent_name=self.name, content=content, raw_text=raw)
+
+    async def speak_round3(
+        self,
+        topic: str,
+        round2_summary: str,
+        moderator_summary: str,
+        attacks_on_me: str,
+    ) -> AgentMessage:
+        prompt = EXPERT_ROUND3_PROMPT.format(
+            role_label=self.role_label,
+            topic=topic,
+            round2_summary=round2_summary,
+            moderator_summary=moderator_summary,
+            agent_name=self.name,
+            attacks_on_me=attacks_on_me,
+        )
+        raw = await self._call_llm(prompt)
+        content = safe_parse_agent_output(
+            raw,
+            [
+                "strongest_attack_on_me",
+                "accepted_criticisms",
+                "revisions",
+                "final_position",
+                "preferred_solution",
+            ],
+        )
+        return AgentMessage(round_index=3, agent_name=self.name, content=content, raw_text=raw)
+
+    async def speak_round4(
+        self, topic: str, focused_issues: str, compressed_summary: str
+    ) -> AgentMessage:
+        prompt = EXPERT_ROUND4_PROMPT.format(
+            role_label=self.role_label,
+            topic=topic,
+            focused_issues=focused_issues,
+            compressed_summary=compressed_summary,
+        )
+        raw = await self._call_llm(prompt)
+        content = safe_parse_agent_output(
+            raw,
+            ["focused_issue", "final_addition", "last_attack_or_defense", "closing_view"],
+        )
+        return AgentMessage(round_index=4, agent_name=self.name, content=content, raw_text=raw)
+
+
+class ModeratorAgent(BaseMeetingAgent):
+    """The moderator/arbiter of the roundtable meeting."""
+
+    def __init__(
+        self,
+        provider: LLMProviderConfig,
+        name: str = "Moderator",
+    ):
+        system_prompt = (
+            "你是圆桌会议的仲裁者和主持人。你的职责是引导话题、每轮做总结、"
+            "为每个专家打分，并在最终输出推荐方案。保持中立，不深度参与具体业务分析。"
+        )
+        super().__init__(name, "仲裁者", system_prompt, provider)
+
+    async def opening(self, topic: str, expert_specs: str, goal: Optional[str], constraints: list, background: Optional[str]) -> str:
+        goal_section = f"目标：{goal}" if goal else ""
+        constraints_section = (
+            "限制条件：\n" + "\n".join(f"- {c}" for c in constraints)
+            if constraints
+            else ""
+        )
+        background_section = f"背景信息：{background}" if background else ""
+
+        prompt = MODERATOR_OPENING_PROMPT.format(
+            topic=topic,
+            expert_specs=expert_specs,
+            goal_section=goal_section,
+            constraints_section=constraints_section,
+            background_section=background_section,
+        )
+        return await self._call_llm(prompt)
+
+    async def summarize_and_score(
+        self,
+        round_index: int,
+        topic: str,
+        round_messages: str,
+        previous_context: str = "",
+    ) -> RoundSummary:
+        prompt = MODERATOR_SUMMARY_PROMPT.format(
+            round_index=round_index,
+            topic=topic,
+            round_messages=round_messages,
+            previous_context=(
+                f"\n前面轮次的上下文：\n{previous_context}" if previous_context else ""
+            ),
+        )
+        raw = await self._call_llm(prompt)
+        parsed = parse_json_response(raw)
+
+        if parsed is None:
+            logger.warning("Failed to parse moderator summary, using raw text")
+            return RoundSummary(
+                round_index=round_index,
+                new_valuable_ideas=[],
+                strong_critiques=[],
+                points_worth_preserving=[],
+                scores=[],
+                next_step="",
+                should_continue=round_index < 3,
+                raw_text=raw,
+            )
+
+        scores = []
+        for s in parsed.get("scores", []):
+            scores.append(
+                RoundScore(
+                    round_index=round_index,
+                    agent_name=s.get("agent_name", ""),
+                    novelty_score=int(s.get("novelty_score", 0)),
+                    critique_score=int(s.get("critique_score", 0)),
+                    comment=s.get("comment", ""),
+                )
+            )
+
+        return RoundSummary(
+            round_index=round_index,
+            new_valuable_ideas=parsed.get("new_valuable_ideas", []),
+            strong_critiques=parsed.get("strong_critiques", []),
+            points_worth_preserving=parsed.get("points_worth_preserving", []),
+            scores=scores,
+            next_step=parsed.get("next_step", ""),
+            should_continue=parsed.get("should_continue", round_index < 3),
+            raw_text=raw,
+        )
+
+    async def finalize(self, topic: str, all_discussion: str) -> FinalReport:
+        prompt = MODERATOR_FINAL_PROMPT.format(
+            topic=topic, all_discussion=all_discussion
+        )
+        raw = await self._call_llm(prompt)
+        parsed = parse_json_response(raw)
+
+        if parsed is None:
+            logger.warning("Failed to parse final report, using raw text")
+            return FinalReport(
+                problem_definition=topic,
+                main_consensus=[],
+                main_disagreements=[],
+                recommended_solution="",
+                why_this_solution="",
+                preserved_minority_opinions=[],
+                agent_contributions={},
+                final_scores=[],
+                raw_markdown=raw,
+            )
+
+        final_scores = []
+        for s in parsed.get("final_scores", []):
+            final_scores.append(
+                FinalScore(
+                    agent_name=s.get("agent_name", ""),
+                    contribution_score=int(s.get("contribution_score", 0)),
+                    summary=s.get("summary", ""),
+                )
+            )
+
+        return FinalReport(
+            problem_definition=parsed.get("problem_definition", ""),
+            main_consensus=parsed.get("main_consensus", []),
+            main_disagreements=parsed.get("main_disagreements", []),
+            recommended_solution=parsed.get("recommended_solution", ""),
+            why_this_solution=parsed.get("why_this_solution", ""),
+            preserved_minority_opinions=parsed.get("preserved_minority_opinions", []),
+            agent_contributions=parsed.get("agent_contributions", {}),
+            final_scores=final_scores,
+            raw_markdown=raw,
+        )

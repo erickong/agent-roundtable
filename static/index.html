@@ -1,0 +1,967 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Roundtable Meeting System</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/marked@latest/marked.min.css">
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+<style>
+:root {
+  --bg: #f5f5f5;
+  --chat-bg: #ededed;
+  --sidebar-bg: #2e2e2e;
+  --sidebar-hover: #3a3a3a;
+  --sidebar-text: #ccc;
+  --bubble-self: #95ec69;
+  --bubble-other: #fff;
+  --bubble-moderator: #ffeeba;
+  --bubble-system: #e8e8e8;
+  --bubble-final: #d4edda;
+  --accent: #07c160;
+  --text: #333;
+  --text-light: #999;
+  --border: #ddd;
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  background: var(--bg);
+  height: 100vh;
+  display: flex;
+  overflow: hidden;
+}
+/* Sidebar */
+.sidebar {
+  width: 260px;
+  min-width: 260px;
+  background: var(--sidebar-bg);
+  color: var(--sidebar-text);
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid #222;
+}
+.sidebar-header {
+  padding: 16px;
+  font-size: 16px;
+  font-weight: 600;
+  color: #fff;
+  border-bottom: 1px solid #444;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+.btn-lang {
+  background: transparent;
+  color: var(--sidebar-text);
+  border: 1px solid #555;
+  border-radius: 4px;
+  padding: 3px 8px;
+  cursor: pointer;
+  font-size: 11px;
+  white-space: nowrap;
+  transition: border-color .2s;
+}
+.btn-lang:hover { border-color: #aaa; color: #fff; }
+.btn-new-session {
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  padding: 6px 14px;
+  cursor: pointer;
+  font-size: 13px;
+  transition: background .2s;
+}
+.btn-new-session:hover { background: #059e4e; }
+.session-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px;
+}
+.session-item {
+  padding: 10px 12px;
+  border-radius: 8px;
+  cursor: pointer;
+  margin-bottom: 4px;
+  font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: background .15s;
+}
+.session-item:hover { background: var(--sidebar-hover); }
+.session-item.active { background: var(--sidebar-hover); color: #fff; font-weight: 500; }
+.session-del {
+  display: none;
+  margin-left: 6px;
+  color: #888;
+  font-size: 16px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.session-del:hover { color: #e74c3c; }
+.session-item:hover .session-del { display: inline; }
+/* Main area */
+.main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  background: var(--chat-bg);
+}
+/* Chat header */
+.chat-header {
+  padding: 12px 20px;
+  background: #f7f7f7;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 15px;
+  font-weight: 500;
+}
+.chat-header .status { font-size: 12px; color: var(--text-light); }
+.btn-stop {
+  background: #e74c3c;
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  padding: 6px 16px;
+  cursor: pointer;
+  font-size: 13px;
+  display: none;
+}
+.btn-stop:hover { background: #c0392b; }
+.btn-stop.visible { display: inline-block; }
+/* Chat messages */
+.chat-messages {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px 20px;
+  scroll-behavior: smooth;
+}
+/* Round divider */
+.round-divider {
+  text-align: center;
+  margin: 20px 0 12px;
+  position: relative;
+}
+.round-divider span {
+  background: var(--chat-bg);
+  padding: 2px 16px;
+  font-size: 12px;
+  color: var(--text-light);
+  position: relative;
+  z-index: 1;
+}
+.round-divider::before {
+  content: '';
+  position: absolute;
+  left: 0; right: 0; top: 50%;
+  border-top: 1px solid #ccc;
+}
+/* Message bubble */
+.msg {
+  display: flex;
+  margin-bottom: 16px;
+  max-width: 85%;
+  align-items: flex-start;
+}
+.msg.moderator, .msg.final-report { max-width: 92%; }
+.msg.system-msg {
+  max-width: 100%;
+  justify-content: center;
+}
+.msg .avatar {
+  width: 40px;
+  height: 40px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  font-weight: 700;
+  color: #fff;
+  flex-shrink: 0;
+  margin-right: 10px;
+}
+.msg .bubble {
+  background: var(--bubble-other);
+  border-radius: 6px;
+  padding: 10px 14px;
+  font-size: 14px;
+  line-height: 1.6;
+  word-break: break-word;
+  box-shadow: 0 1px 1px rgba(0,0,0,.06);
+  position: relative;
+}
+.msg .bubble .sender-name {
+  font-size: 12px;
+  color: var(--text-light);
+  margin-bottom: 4px;
+  font-weight: 500;
+}
+.msg .bubble .msg-content { color: var(--text); }
+.msg .bubble .msg-content pre {
+  background: #f6f6f6;
+  border-radius: 4px;
+  padding: 8px 10px;
+  overflow-x: auto;
+  font-size: 13px;
+  margin: 6px 0;
+}
+.msg .bubble .msg-content code {
+  background: #f0f0f0;
+  padding: 1px 4px;
+  border-radius: 3px;
+  font-size: 13px;
+}
+.msg .bubble .msg-content table { border-collapse: collapse; margin: 6px 0; width: 100%; }
+.msg .bubble .msg-content th, .msg .bubble .msg-content td { border: 1px solid #ddd; padding: 4px 8px; font-size: 13px; }
+.msg .bubble .msg-content th { background: #f6f6f6; }
+.msg .bubble .msg-content ul, .msg .bubble .msg-content ol { padding-left: 20px; margin: 4px 0; }
+.msg .bubble .msg-content li { margin: 2px 0; }
+.msg .bubble .msg-content h1, .msg .bubble .msg-content h2, .msg .bubble .msg-content h3 { margin: 8px 0 4px; }
+.msg .bubble .msg-content p { margin: 4px 0; }
+.msg.moderator .bubble { background: var(--bubble-moderator); }
+.msg.final-report .bubble { background: var(--bubble-final); border: 1px solid #b7dfc5; }
+.msg.system-msg .bubble {
+  background: var(--bubble-system);
+  font-size: 12px;
+  color: var(--text-light);
+  border-radius: 12px;
+  padding: 4px 14px;
+  box-shadow: none;
+}
+.msg.error .bubble { background: #f8d7da; color: #721c24; }
+/* Agent thinking indicator */
+.msg .bubble .thinking {
+  display: inline-block;
+  color: var(--text-light);
+  font-style: italic;
+  font-size: 13px;
+}
+.thinking::after {
+  content: '';
+  animation: dots 1.4s infinite;
+}
+@keyframes dots {
+  0%, 20% { content: '.'; }
+  40% { content: '..'; }
+  60%, 100% { content: '...'; }
+}
+/* Input area */
+.chat-input-area {
+  padding: 12px 20px;
+  background: #f7f7f7;
+  border-top: 1px solid var(--border);
+}
+.input-row {
+  display: flex;
+  gap: 8px;
+  align-items: flex-end;
+}
+.chat-textarea {
+  flex: 1;
+  resize: none;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 14px;
+  font-size: 14px;
+  font-family: inherit;
+  min-height: 44px;
+  max-height: 200px;
+  outline: none;
+  background: #fff;
+  transition: border-color .2s;
+}
+.chat-textarea:focus { border-color: var(--accent); }
+.btn-send {
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  padding: 10px 24px;
+  cursor: pointer;
+  font-size: 14px;
+  white-space: nowrap;
+  height: 44px;
+  transition: background .2s;
+}
+.btn-send:hover { background: #059e4e; }
+.btn-send:disabled { background: #ccc; cursor: default; }
+/* Search skill checkbox */
+.search-skill-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--text);
+  cursor: pointer;
+  white-space: nowrap;
+  user-select: none;
+  height: 44px;
+}
+.search-skill-label input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+/* Search result bubble */
+.msg.search-result .bubble {
+  background: #e8f4fd;
+  border: 1px solid #bee5f7;
+  max-height: 400px;
+  overflow-y: auto;
+}
+.msg.search-result .bubble .sender-name { color: #2980b9; }
+/* Collapsible options */
+.extra-options {
+  margin-top: 8px;
+  display: none;
+  gap: 8px;
+}
+.extra-options.visible { display: flex; flex-wrap: wrap; }
+.extra-input {
+  flex: 1;
+  min-width: 180px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px 10px;
+  font-size: 13px;
+  font-family: inherit;
+  outline: none;
+  background: #fff;
+}
+.extra-input:focus { border-color: var(--accent); }
+.toggle-options {
+  background: none;
+  border: none;
+  color: var(--accent);
+  font-size: 12px;
+  cursor: pointer;
+  margin-top: 6px;
+}
+/* Welcome screen */
+.welcome {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  color: var(--text-light);
+}
+.welcome h2 { font-size: 22px; color: var(--text); margin-bottom: 8px; }
+.welcome p { font-size: 14px; }
+/* Scrollbar */
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #ccc; border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: #aaa; }
+</style>
+</head>
+<body>
+
+<!-- Sidebar -->
+<div class="sidebar">
+  <div class="sidebar-header">
+    <span id="sidebarTitle">🏛️ Roundtable</span>
+    <div style="display:flex;gap:6px;align-items:center">
+      <button class="btn-lang" id="btnLang" onclick="toggleLang()">CN/EN</button>
+      <button class="btn-new-session" id="btnNewSession" onclick="newSession()">+ New</button>
+    </div>
+  </div>
+  <div class="session-list" id="sessionList"></div>
+</div>
+
+<!-- Main chat area -->
+<div class="main" id="mainArea">
+  <div class="welcome" id="welcomeScreen">
+    <h2>🏛️ Multi-Agent Roundtable Meeting System</h2>
+    <p>Click "+ New" to start a roundtable discussion</p>
+  </div>
+</div>
+
+<script>
+// ============================================================
+// i18n
+// ============================================================
+const T = {
+  en: {
+    sidebarTitle: '🏛️ Roundtable',
+    newSession: '+ New',
+    welcomeTitle: '🏛️ Multi-Agent Roundtable Meeting System',
+    welcomeDesc: 'Click "+ New" to start a roundtable discussion',
+    newSessionTitle: 'New Meeting',
+    placeholderTopic: 'Enter discussion topic...',
+    placeholderChat: 'Ask the moderator...',
+    send: 'Send',
+    stop: '⏹ Stop',
+    searchLabel: '🔍 Web Search',
+    advancedOptions: '⚙ Advanced Options',
+    goalPlaceholder: 'Goal (optional)',
+    bgPlaceholder: 'Background (optional, web search can auto-fill)',
+    constraintsPlaceholder: 'Constraints (optional, one per line)',
+    discussing: 'Discussing...',
+    meetingDoneChat: 'Meeting ended · Continue chatting',
+    deleteTitle: 'Delete',
+    thinking: 'Thinking',
+    searchResults: 'Tavily Search Results',
+    meetingStarting: 'Meeting starting, preparing...',
+    userAvatar: 'Me',
+    moderatorInitial: 'M',
+    searchTooltip: 'When enabled, the moderator will auto-search for background info before the meeting',
+    connError: 'Connection failed. Please check the server.',
+  },
+  zh: {
+    sidebarTitle: '🏛️ 圆桌会议',
+    newSession: '+ 新会议',
+    welcomeTitle: '🏛️ 多Agent圆桌会议系统',
+    welcomeDesc: '点击「+ 新会议」开始一场圆桌讨论',
+    newSessionTitle: '新会议',
+    placeholderTopic: '输入讨论议题...',
+    placeholderChat: '向仲裁者提问...',
+    send: '发送',
+    stop: '⏹ 停止',
+    searchLabel: '🔍 联网搜索',
+    advancedOptions: '⚙ 高级选项',
+    goalPlaceholder: '目标 (可选)',
+    bgPlaceholder: '背景信息 (可选，勾选联网搜索可自动补充)',
+    constraintsPlaceholder: '约束条件 (可选，每行一个)',
+    discussing: '讨论中...',
+    meetingDoneChat: '会议已结束 · 可继续对话',
+    deleteTitle: '删除',
+    thinking: '正在思考',
+    searchResults: 'Tavily 搜索结果',
+    meetingStarting: '会议开始，正在准备...',
+    userAvatar: '我',
+    moderatorInitial: '主',
+    searchTooltip: '启用后，仲裁者将在会议前自动搜索相关背景信息',
+    connError: '连接失败，请检查服务器。',
+  },
+};
+let currentLang = localStorage.getItem('rt_lang') || 'en';
+function t(key) { return T[currentLang][key] || T['en'][key] || key; }
+function toggleLang() {
+  currentLang = currentLang === 'en' ? 'zh' : 'en';
+  localStorage.setItem('rt_lang', currentLang);
+  applyLang();
+}
+function applyLang() {
+  document.getElementById('sidebarTitle').textContent = t('sidebarTitle');
+  document.getElementById('btnNewSession').textContent = t('newSession');
+  document.getElementById('btnLang').textContent = currentLang === 'en' ? '中文' : 'EN';
+  document.title = currentLang === 'en' ? 'Roundtable Meeting System' : '圆桌会议系统';
+  // Re-render current view to apply translations
+  if (activeSessionId) renderChatView();
+  else {
+    const main = document.getElementById('mainArea');
+    main.innerHTML = `<div class="welcome"><h2>${t('welcomeTitle')}</h2><p>${t('welcomeDesc')}</p></div>`;
+  }
+}
+
+// ============================================================
+// State
+// ============================================================
+const sessions = {};      // id -> { title, ws, messages: [], running, meetingDone, searchEnabled }
+let activeSessionId = null;
+let searchDefaultEnabled = localStorage.getItem('rt_search_default') === '1';
+const AGENT_COLORS = {
+  'Moderator': '#e67e22',
+  '创新专家': '#3498db',
+  '审慎专家': '#e74c3c',
+  '工程专家': '#2ecc71',
+  '领域专家': '#9b59b6',
+};
+function getAgentColor(name) {
+  if (AGENT_COLORS[name]) return AGENT_COLORS[name];
+  let h = 0;
+  for (let i = 0; i < name.length; i++) h = name.charCodeAt(i) + ((h << 5) - h);
+  return `hsl(${h % 360}, 55%, 50%)`;
+}
+function getAgentInitial(name) {
+  if (name === 'Moderator') return t('moderatorInitial');
+  return name.charAt(0);
+}
+
+// ============================================================
+// Persistence (localStorage)
+// ============================================================
+function saveSessions() {
+  const data = {};
+  for (const [id, s] of Object.entries(sessions)) {
+    data[id] = { title: s.title, messages: s.messages, meetingDone: s.meetingDone, searchEnabled: s.searchEnabled || false };
+  }
+  try {
+    localStorage.setItem('rt_sessions', JSON.stringify(data));
+    localStorage.setItem('rt_active', activeSessionId || '');
+    localStorage.setItem('rt_search_default', searchDefaultEnabled ? '1' : '0');
+  } catch {}
+}
+
+function loadSessions() {
+  try {
+    const raw = localStorage.getItem('rt_sessions');
+    if (!raw) return false;
+    const data = JSON.parse(raw);
+    for (const [id, s] of Object.entries(data)) {
+      sessions[id] = {
+        title: s.title,
+        ws: null,
+        messages: s.messages || [],
+        running: false,
+        meetingDone: s.meetingDone || false,
+        searchEnabled: s.searchEnabled !== undefined ? s.searchEnabled : searchDefaultEnabled,
+      };
+    }
+    const savedActive = localStorage.getItem('rt_active');
+    if (savedActive && sessions[savedActive]) activeSessionId = savedActive;
+    return Object.keys(sessions).length > 0;
+  } catch { return false; }
+}
+
+// ============================================================
+// Session management
+// ============================================================
+function newSession() {
+  const id = 'sess_' + Date.now();
+  sessions[id] = {
+    title: t('newSessionTitle'),
+    ws: null,
+    messages: [],
+    running: false,
+    meetingDone: false,
+    searchEnabled: searchDefaultEnabled,
+  };
+  switchToSession(id);
+  renderSessionList();
+  saveSessions();
+}
+
+function handleSearchToggle(checked) {
+  const session = sessions[activeSessionId];
+  if (!session) return;
+  session.searchEnabled = checked;
+  searchDefaultEnabled = checked;
+  saveSessions();
+}
+
+function switchToSession(id) {
+  activeSessionId = id;
+  renderSessionList();
+  renderChatView();
+  saveSessions();
+}
+
+function renderSessionList() {
+  const list = document.getElementById('sessionList');
+  list.innerHTML = '';
+  for (const [id, s] of Object.entries(sessions)) {
+    const el = document.createElement('div');
+    el.className = 'session-item' + (id === activeSessionId ? ' active' : '');
+    el.innerHTML = `<span style="flex:1;overflow:hidden;text-overflow:ellipsis">${escapeHtml(s.title)}</span>
+      <span class="session-del" title="${t('deleteTitle')}" onclick="event.stopPropagation();deleteSession('${id}')">×</span>`;
+    el.style.display = 'flex';
+    el.style.alignItems = 'center';
+    el.onclick = () => switchToSession(id);
+    list.appendChild(el);
+  }
+}
+
+function deleteSession(id) {
+  if (sessions[id] && sessions[id].running) {
+    if (sessions[id].ws) sessions[id].ws.send(JSON.stringify({ action: 'stop_meeting' }));
+  }
+  if (sessions[id] && sessions[id].ws) {
+    try { sessions[id].ws.close(); } catch {}
+  }
+  delete sessions[id];
+  if (activeSessionId === id) {
+    const remaining = Object.keys(sessions);
+    activeSessionId = remaining.length > 0 ? remaining[remaining.length - 1] : null;
+  }
+  renderSessionList();
+  if (activeSessionId) renderChatView();
+  else {
+    const main = document.getElementById('mainArea');
+    main.innerHTML = `<div class="welcome"><h2>${t('welcomeTitle')}</h2><p>${t('welcomeDesc')}</p></div>`;
+  }
+  saveSessions();
+}
+
+// ============================================================
+// Chat view
+// ============================================================
+function renderChatView() {
+  const main = document.getElementById('mainArea');
+  const session = sessions[activeSessionId];
+  if (!session) {
+    main.innerHTML = `<div class="welcome" id="welcomeScreen">
+      <h2>${t('welcomeTitle')}</h2>
+      <p>${t('welcomeDesc')}</p></div>`;
+    return;
+  }
+  const isChatMode = session.meetingDone && !session.running;
+  const placeholder = isChatMode ? t('placeholderChat') : t('placeholderTopic');
+  main.innerHTML = `
+    <div class="chat-header">
+      <div>
+        <span id="chatTitle">${escapeHtml(session.title)}</span>
+        <span class="status" id="chatStatus">${session.running ? t('discussing') : (isChatMode ? t('meetingDoneChat') : '')}</span>
+      </div>
+      <button class="btn-stop ${session.running ? 'visible' : ''}" id="btnStop" onclick="stopMeeting()">${t('stop')}</button>
+    </div>
+    <div class="chat-messages" id="chatMessages"></div>
+    <div class="chat-input-area">
+      <div class="input-row">
+        <textarea class="chat-textarea" id="topicInput" rows="1" placeholder="${placeholder}"
+          onkeydown="handleInputKey(event)"></textarea>
+        ${isChatMode ? '' : `<label class="search-skill-label" title="${t('searchTooltip')}">
+          <input type="checkbox" id="searchSkill"${session.searchEnabled ? ' checked' : ''} onchange="handleSearchToggle(this.checked)"> ${t('searchLabel')}
+        </label>`}
+        <button class="btn-send" id="btnSend" onclick="sendTopic()">${t('send')}</button>
+      </div>
+      ${isChatMode ? '' : `<button class="toggle-options" onclick="toggleOptions()">${t('advancedOptions')}</button>
+      <div class="extra-options" id="extraOptions">
+        <input class="extra-input" id="goalInput" placeholder="${t('goalPlaceholder')}">
+        <textarea class="extra-input" id="bgInput" rows="3" placeholder="${t('bgPlaceholder')}" style="min-height:60px;resize:vertical"></textarea>
+        <input class="extra-input" id="constraintsInput" placeholder="${t('constraintsPlaceholder')}">
+      </div>`}
+    </div>
+  `;
+  // Auto-resize textarea
+  const ta = document.getElementById('topicInput');
+  ta.addEventListener('input', () => {
+    ta.style.height = 'auto';
+    ta.style.height = Math.min(ta.scrollHeight, 200) + 'px';
+  });
+  // Render existing messages
+  renderMessages();
+  if (session.running) {
+    document.getElementById('btnSend').disabled = true;
+  }
+}
+
+function renderMessages() {
+  const container = document.getElementById('chatMessages');
+  if (!container) return;
+  const session = sessions[activeSessionId];
+  if (!session) return;
+  container.innerHTML = '';
+  for (const msg of session.messages) {
+    container.appendChild(createMsgElement(msg));
+  }
+  scrollToBottom();
+}
+
+function appendMessage(msg) {
+  const session = sessions[activeSessionId];
+  if (!session) return;
+  // Remove corresponding agent_start message from history when the actual message arrives
+  if (msg.type === 'agent_message' || msg.type === 'moderator_summary' || msg.type === 'final_report' || msg.type === 'agent_error') {
+    session.messages = session.messages.filter(m => !(m.type === 'agent_start' && m.agent === msg.agent && String(m.round) === String(msg.round)));
+    const container = document.getElementById('chatMessages');
+    if (container) {
+      const safeAgent = msg.agent ? msg.agent.replace(/"/g, '\\"') : '';
+      const safeRound = msg.round !== undefined ? String(msg.round).replace(/"/g, '\\"') : '';
+      const thinkingEls = container.querySelectorAll(`[data-thinking-agent="${safeAgent}"][data-thinking-round="${safeRound}"]`);
+      thinkingEls.forEach(el => el.remove());
+    }
+  }
+  session.messages.push(msg);
+  saveSessions();
+  const container = document.getElementById('chatMessages');
+  if (!container) return;
+  container.appendChild(createMsgElement(msg));
+  scrollToBottom();
+}
+
+function createMsgElement(msg) {
+  const div = document.createElement('div');
+
+  if (msg.type === 'round_start') {
+    div.className = 'round-divider';
+    div.innerHTML = `<span>── ${escapeHtml(msg.title)} ──</span>`;
+    return div;
+  }
+
+  if (msg.type === 'system' || msg.type === 'meeting_end') {
+    div.className = 'msg system-msg';
+    div.innerHTML = `<div class="bubble">${escapeHtml(msg.content)}</div>`;
+    return div;
+  }
+
+  if (msg.type === 'error') {
+    div.className = 'msg system-msg error';
+    div.innerHTML = `<div class="bubble">❌ ${escapeHtml(msg.content)}</div>`;
+    return div;
+  }
+
+  if (msg.type === 'search_start') {
+    div.className = 'msg system-msg';
+    div.innerHTML = `<div class="bubble">${escapeHtml(msg.content)}</div>`;
+    return div;
+  }
+
+  if (msg.type === 'search_result') {
+    div.className = 'msg search-result';
+    div.style.maxWidth = '92%';
+    const rendered = renderContent(msg.content);
+    div.innerHTML = `
+      <div class="avatar" style="background:#3498db">🔍</div>
+      <div class="bubble">
+        <div class="sender-name">${t('searchResults')} (${msg.result_count || '?'})</div>
+        <div class="msg-content">${rendered}</div>
+      </div>`;
+    return div;
+  }
+
+  if (msg.type === 'agent_start') {
+    div.className = 'msg';
+    div.setAttribute('data-thinking-agent', msg.agent);
+    div.setAttribute('data-thinking-round', msg.round);
+    const color = getAgentColor(msg.agent);
+    div.innerHTML = `
+      <div class="avatar" style="background:${color}">${getAgentInitial(msg.agent)}</div>
+      <div class="bubble"><div class="sender-name">${escapeHtml(msg.agent)}</div>
+        <div class="msg-content"><span class="thinking">${t('thinking')}</span></div>
+      </div>`;
+    return div;
+  }
+
+  if (msg.type === 'agent_message' || msg.type === 'moderator_summary' || msg.type === 'final_report' || msg.type === 'agent_error') {
+    const isMod = msg.agent === 'Moderator';
+    const isFinal = msg.type === 'final_report';
+    const isError = msg.type === 'agent_error';
+    let cls = 'msg';
+    if (isFinal) cls += ' final-report';
+    else if (isMod) cls += ' moderator';
+    if (isError) cls += ' error';
+    div.className = cls;
+
+    const color = getAgentColor(msg.agent);
+    const rendered = renderContent(msg.content);
+    div.innerHTML = `
+      <div class="avatar" style="background:${color}">${getAgentInitial(msg.agent)}</div>
+      <div class="bubble">
+        <div class="sender-name">${escapeHtml(msg.agent)}${msg.role ? ' · ' + escapeHtml(msg.role) : ''}${msg.round !== undefined && msg.round !== 'final' ? ' · R' + msg.round : ''}</div>
+        <div class="msg-content">${rendered}</div>
+      </div>`;
+    return div;
+  }
+
+  // User message
+  if (msg.type === 'user') {
+    div.className = 'msg';
+    div.style.flexDirection = 'row-reverse';
+    div.style.marginLeft = 'auto';
+    div.innerHTML = `
+      <div class="avatar" style="background:#555;margin-right:0;margin-left:10px">${t('userAvatar')}</div>
+      <div class="bubble" style="background:var(--bubble-self)">
+        <div class="msg-content">${escapeHtml(msg.content)}</div>
+      </div>`;
+    return div;
+  }
+
+  return div;
+}
+
+function renderContent(text) {
+  if (!text) return '';
+  // Try to parse as JSON and render as readable content
+  try {
+    const obj = JSON.parse(text);
+    if (typeof obj === 'object' && obj !== null) {
+      const md = jsonToMarkdown(obj);
+      return marked.parse(md);
+    }
+  } catch {}
+  // Render as markdown
+  return marked.parse(text);
+}
+
+function jsonToMarkdown(obj, depth) {
+  depth = depth || 0;
+  const lines = [];
+  const indent = '  '.repeat(depth);
+  for (const [key, val] of Object.entries(obj)) {
+    const label = key.replace(/_/g, ' ');
+    if (Array.isArray(val)) {
+      lines.push(`${indent}**${label}:**`);
+      for (const item of val) {
+        if (typeof item === 'object' && item !== null) {
+          lines.push(`${indent}- ` + Object.entries(item).map(([k, v]) => `**${k.replace(/_/g, ' ')}**: ${v}`).join(' | '));
+        } else {
+          lines.push(`${indent}- ${item}`);
+        }
+      }
+    } else if (typeof val === 'object' && val !== null) {
+      lines.push(`${indent}**${label}:**`);
+      lines.push(jsonToMarkdown(val, depth + 1));
+    } else {
+      lines.push(`${indent}**${label}:** ${val}`);
+    }
+  }
+  return lines.join('\n');
+}
+
+function scrollToBottom() {
+  const c = document.getElementById('chatMessages');
+  if (c) requestAnimationFrame(() => c.scrollTop = c.scrollHeight);
+}
+
+// ============================================================
+// Actions
+// ============================================================
+function handleInputKey(e) {
+  if (e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault();
+    sendTopic();
+  }
+}
+
+function toggleOptions() {
+  const el = document.getElementById('extraOptions');
+  el.classList.toggle('visible');
+}
+
+function ensureWs() {
+  const session = sessions[activeSessionId];
+  if (!session) return null;
+  if (session.ws && session.ws.readyState === WebSocket.OPEN) return session.ws;
+  const protocol = location.protocol === 'https:' ? 'wss' : 'ws';
+  const ws = new WebSocket(`${protocol}://${location.host}/ws/${activeSessionId}`);
+  session.ws = ws;
+  ws.onmessage = (e) => {
+    const msg = JSON.parse(e.data);
+    appendMessage(msg);
+    if (msg.type === 'search_result') {
+      // Auto-fill background with search results
+      const bgEl = document.getElementById('bgInput');
+      if (bgEl) {
+        const opts = document.getElementById('extraOptions');
+        if (opts && !opts.classList.contains('visible')) opts.classList.add('visible');
+        bgEl.value = msg.content;
+      }
+    }
+    if (msg.type === 'meeting_end') {
+      session.running = false;
+      session.meetingDone = true;
+      updateRunningUI(false);
+      saveSessions();
+    }
+  };
+  ws.onerror = () => {
+    appendMessage({ type: 'error', content: t('connError') });
+    session.running = false;
+    updateRunningUI(false);
+  };
+  ws.onclose = () => {
+    if (session.running) {
+      session.running = false;
+      updateRunningUI(false);
+    }
+  };
+  return ws;
+}
+
+function sendTopic() {
+  const session = sessions[activeSessionId];
+  if (!session || session.running) return;
+
+  const topicEl = document.getElementById('topicInput');
+  const topic = topicEl.value.trim();
+  if (!topic) return;
+
+  // Clear topic input after sending
+  topicEl.value = '';
+  topicEl.style.height = 'auto';
+
+  // If meeting already done, switch to chat mode
+  if (session.meetingDone) {
+    appendMessage({ type: 'user', content: topic });
+    const ws = ensureWs();
+    const send = () => ws.send(JSON.stringify({ action: 'chat', message: topic }));
+    if (ws.readyState === WebSocket.OPEN) { send(); }
+    else { ws.addEventListener('open', send, { once: true }); }
+    return;
+  }
+
+  const goalEl = document.getElementById('goalInput');
+  const bgEl = document.getElementById('bgInput');
+  const cEl = document.getElementById('constraintsInput');
+  const goal = goalEl ? goalEl.value.trim() : '';
+  const background = bgEl ? bgEl.value.trim() : '';
+  const constraints = cEl ? cEl.value.trim() : '';
+
+  // Update session title
+  session.title = topic.substring(0, 30) + (topic.length > 30 ? '...' : '');
+  renderSessionList();
+  saveSessions();
+
+  // Show user message
+  session.messages = [];
+  session.meetingDone = false;
+  appendMessage({ type: 'user', content: topic });
+
+  // Clear topic input after sending
+  topicEl.value = '';
+  topicEl.style.height = 'auto';
+
+  // Check if search skill is enabled
+  const searchSkillEl = document.getElementById('searchSkill');
+  const searchEnabled = searchSkillEl ? searchSkillEl.checked : false;
+  session.searchEnabled = searchEnabled;
+  saveSessions();
+
+  // Connect WebSocket (reuse if already open from search)
+  const ws = ensureWs();
+  session.running = true;
+  updateRunningUI(true);
+
+  const send = () => ws.send(JSON.stringify({
+    action: 'start_meeting',
+    topic, goal, background, constraints,
+    search_enabled: searchEnabled,
+  }));
+  if (ws.readyState === WebSocket.OPEN) { send(); }
+  else { ws.addEventListener('open', send, { once: true }); }
+}
+
+function stopMeeting() {
+  const session = sessions[activeSessionId];
+  if (!session || !session.ws) return;
+  session.ws.send(JSON.stringify({ action: 'stop_meeting' }));
+}
+
+function updateRunningUI(running) {
+  const btn = document.getElementById('btnStop');
+  const send = document.getElementById('btnSend');
+  const status = document.getElementById('chatStatus');
+  if (btn) btn.className = 'btn-stop' + (running ? ' visible' : '');
+  if (send) send.disabled = running;
+  if (status) status.textContent = running ? t('discussing') : '';
+  // Re-render to switch between meeting / chat mode UI
+  if (!running) renderChatView();
+}
+
+function escapeHtml(s) {
+  if (!s) return '';
+  const d = document.createElement('div');
+  d.textContent = s;
+  return d.innerHTML;
+}
+
+// Restore from localStorage or create first session
+if (loadSessions()) {
+  renderSessionList();
+  if (activeSessionId) renderChatView();
+} else {
+  newSession();
+}
+applyLang();
+</script>
+</body>
+</html>
