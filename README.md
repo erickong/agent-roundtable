@@ -57,6 +57,7 @@ A multi-agent roundtable discussion system where multiple AI experts debate a gi
    - `MODERATOR_LLM_*` — at least one moderator LLM (API key, base URL, model)
    - `LLM_PROVIDER_1_*` — at least one expert LLM provider
    - `TAVILY_API_KEY` — (optional) for web search feature
+   - `SEARCH_API_URL` — (optional) use a local Tavily-compatible search service instead of Tavily
 
    If `.env` is missing on first run, the CLI/server will exit with a clear error message.
    Standard local workflow is: copy `.env.example` to `.env`, fill in keys, then restart.
@@ -99,6 +100,7 @@ A multi-agent roundtable discussion system where multiple AI experts debate a gi
 | `LLM_PROVIDER_N_MODEL` | Expert provider N model |
 | `LLM_PROVIDER_N_WEIGHT` | Selection weight (higher = more likely, default: 1) |
 | `LLM_PROVIDER_N_TIMEOUT` | Request timeout in seconds (default: 300) |
+| `SEARCH_API_URL` | Tavily-compatible search API URL (e.g. local news service) |
 | `TAVILY_API_KEY` | Tavily search API key (free at <https://tavily.com>) |
 
 ### Project Structure
@@ -176,6 +178,7 @@ A multi-agent roundtable discussion system where multiple AI experts debate a gi
    - `MODERATOR_LLM_*` — 至少一个仲裁者LLM（API密钥、地址、模型）
    - `LLM_PROVIDER_1_*` — 至少一个专家LLM提供商
    - `TAVILY_API_KEY` — （可选）用于联网搜索功能
+   - `SEARCH_API_URL` — （可选）使用本地 Tavily 兼容搜索服务替代 Tavily
 
    如果首次启动时缺少 `.env`，CLI/服务端会直接退出并提示错误。
    标准本地流程就是：复制 `.env.example` 为 `.env`，填写密钥后重新启动。
@@ -218,6 +221,7 @@ A multi-agent roundtable discussion system where multiple AI experts debate a gi
 | `LLM_PROVIDER_N_MODEL` | 专家提供商N模型 |
 | `LLM_PROVIDER_N_WEIGHT` | 选择权重（越大越可能被选中，默认1） |
 | `LLM_PROVIDER_N_TIMEOUT` | 请求超时（秒，默认300） |
+| `SEARCH_API_URL` | Tavily兼容的搜索API地址（如本地新闻服务） |
 | `TAVILY_API_KEY` | Tavily搜索API密钥（免费注册: <https://tavily.com>） |
 
 ### 项目结构

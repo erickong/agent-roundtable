@@ -58,10 +58,10 @@ def _render_final_report_markdown(report) -> str:
 async def _research_phase_cli(topic: str, background: str | None, env_path: str | None = None) -> str:
     """Run the research phase via CLI, similar to web_server._research_phase."""
     from openai import AsyncOpenAI
-    from search import tavily_search, get_tavily_api_key
+    from search import tavily_search, get_search_api_url
 
-    if not get_tavily_api_key():
-        logger.warning("Tavily API key not set — skipping web search")
+    if not get_search_api_url():
+        logger.warning("No search backend configured — skipping web search")
         return ""
 
     config = load_config(env_path)
@@ -261,15 +261,16 @@ def main():
             sys.exit(1)
 
     # Startup validation
-    from search import get_tavily_api_key
+    from search import get_search_api_url
     try:
         config = load_config(env_path)
         logger.info("✓ Moderator LLM: %s (%s)", config.moderator_llm.name, config.moderator_llm.model)
         logger.info("✓ Expert providers: %d configured", len(config.expert_providers))
-        if get_tavily_api_key():
-            logger.info("✓ Tavily API key configured")
+        search_url = get_search_api_url()
+        if search_url:
+            logger.info("✓ Search backend: %s", search_url)
         elif search_enabled:
-            logger.warning("✗ Tavily API key not set — --search will be skipped")
+            logger.warning("✗ No search backend configured — --search will be skipped")
             search_enabled = False
     except (ValueError, FileNotFoundError) as e:
         logger.error("Configuration error: %s", e)

@@ -1,4 +1,8 @@
-"""Tavily search integration for background research."""
+"""Web search integration for background research.
+
+Supports Tavily API and any Tavily-compatible search service (e.g. local news API).
+Configure via SEARCH_API_URL env var; defaults to Tavily when TAVILY_API_KEY is set.
+"""
 
 import logging
 import os
@@ -9,6 +13,17 @@ import httpx
 logger = logging.getLogger(__name__)
 
 TAVILY_API_URL = "https://api.tavily.com/search"
+
+
+def get_search_api_url() -> Optional[str]:
+    """Return the configured search API URL, or None if no search backend is available."""
+    url = os.environ.get("SEARCH_API_URL", "").strip()
+    if url:
+        return url
+    # Fall back to Tavily if API key is set
+    if get_tavily_api_key():
+        return TAVILY_API_URL
+    return None
 
 
 def get_tavily_api_key() -> Optional[str]:
@@ -22,7 +37,7 @@ async def tavily_search(
     topic: str = "general",
     api_key: Optional[str] = None,
 ) -> dict:
-    """Search using Tavily API.
+    """Search using Tavily-compatible API.
 
     Args:
         query: Search query string.
@@ -34,12 +49,11 @@ async def tavily_search(
     Returns:
         Dict with 'results' list and formatted 'summary' string.
     """
-    key = api_key or get_tavily_api_key()
-    if not key:
-        raise ValueError("TAVILY_API_KEY not configured. Set it in .env")
+    url = get_search_api_url()
+    if not url:
+        raise ValueError("No search backend configured. Set SEARCH_API_URL or TAVILY_API_KEY in .env")
 
     payload = {
-        "api_key": key,
         "query": query,
         "max_results": max_results,
         "search_depth": search_depth,
@@ -47,8 +61,13 @@ async def tavily_search(
         "include_answer": True,
     }
 
+    # Include api_key only for Tavily (or when explicitly provided)
+    key = api_key or get_tavily_api_key()
+    if key:
+        payload["api_key"] = key
+
     async with httpx.AsyncClient(timeout=30.0) as client:
-        resp = await client.post(TAVILY_API_URL, json=payload)
+        resp = await client.post(url, json=payload)
         resp.raise_for_status()
         data = resp.json()
 

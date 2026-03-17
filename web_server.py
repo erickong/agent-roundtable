@@ -14,7 +14,7 @@ from models import MeetingInput
 from agents import ModeratorAgent, ExpertAgent
 from meeting_streaming import StreamingMeeting
 from i18n import t, get_default_experts, is_chinese, LANG_FOLLOW_INSTRUCTION
-from search import get_tavily_api_key, tavily_search
+from search import get_search_api_url, tavily_search
 
 from openai import AsyncOpenAI
 
@@ -45,10 +45,11 @@ def _validate_startup_configuration(target_app: FastAPI) -> MeetingConfig:
     logger.info("✓ Expert providers: %d configured", len(config.expert_providers))
     for i, provider in enumerate(config.expert_providers, 1):
         logger.info("  Provider %d: %s (%s) weight=%d", i, provider.name, provider.model, provider.weight)
-    if get_tavily_api_key():
-        logger.info("✓ Tavily API key configured (web search available)")
+    search_url = get_search_api_url()
+    if search_url:
+        logger.info("✓ Search backend: %s", search_url)
     else:
-        logger.warning("✗ Tavily API key not set — web search disabled")
+        logger.warning("✗ No search backend configured — web search disabled")
 
     target_app.state.config_validated = True
     return config
