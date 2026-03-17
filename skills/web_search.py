@@ -25,7 +25,9 @@ async def execute(query: str, max_results: int = 5) -> dict:
     Returns:
         Dict with 'results', 'answer', 'summary', and 'result_count'.
     """
-    return await tavily_search(query=query, max_results=max_results, topic="news")
+    # Convert "ALL" to empty query to fetch all latest news
+    actual_query = "" if query.upper() == "ALL" else query
+    return await tavily_search(query=actual_query, max_results=max_results, topic="news")
 
 
 # Prompt instruction appended to expert prompts when search is enabled.
@@ -41,6 +43,7 @@ SKILL_PROMPT = """
 - search_query 只能是1个词（这是新闻数据库搜索，只支持单个关键词查询）
 - 好的例子：「A股」「港股」「芯片」「关税」「新能源」「黄金」「半导体」
 - 坏的例子（不要这样写）：「AI芯片市场」「原油价格走势」「全球半导体投资」
+- 如果搜索不到结果，可以用 "ALL" 作为 search_query 来获取最新全部新闻
 - 如果不需要搜索，**不要**添加该字段
 - 搜索完成后系统会将结果返回给你，届时请基于搜索结果重新组织完整回答"""
 
