@@ -30,6 +30,27 @@ def get_tavily_api_key() -> Optional[str]:
     return os.environ.get("TAVILY_API_KEY", "").strip() or None
 
 
+def parse_local_news_command(command: str) -> tuple[str, Optional[str], str]:
+    """Parse a moderator browse/search command for the local news API.
+
+    Supported commands:
+    - one-word keyword, e.g. "A股"
+    - ALL or RECENT
+    - RECENT:<category>, e.g. RECENT:china_finance
+    """
+    normalized = command.strip()
+    upper = normalized.upper()
+
+    if upper in {"ALL", "RECENT"}:
+        return "", None, "ALL"
+
+    if upper.startswith("RECENT:"):
+        category = normalized.split(":", 1)[1].strip().lower()
+        return "", category or None, f"RECENT:{category}" if category else "ALL"
+
+    return normalized, None, normalized
+
+
 def _is_local_news_api(url: str) -> bool:
     return "192.168.3.89:4001" in url
 

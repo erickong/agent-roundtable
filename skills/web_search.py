@@ -19,7 +19,13 @@ def is_available() -> bool:
     return get_search_api_url() is not None
 
 
-async def execute(query: str = "", category: Optional[str] = None, max_results: int = 5) -> dict:
+async def execute(
+    query: str = "",
+    category: Optional[str] = None,
+    source: Optional[str] = None,
+    days: int = 3,
+    max_results: int = 5,
+) -> dict:
     """Run a web search and return results.
 
     Returns:
@@ -27,7 +33,14 @@ async def execute(query: str = "", category: Optional[str] = None, max_results: 
     """
     # Convert "ALL" to empty query so browse mode uses /recent on the local API.
     actual_query = "" if query.upper() == "ALL" else query
-    return await tavily_search(query=actual_query, category=category, max_results=max_results, topic="news")
+    return await tavily_search(
+        query=actual_query,
+        category=category,
+        source=source,
+        days=days,
+        max_results=max_results,
+        topic="news",
+    )
 
 
 # Prompt instruction appended to expert prompts when search is enabled.
@@ -44,7 +57,9 @@ SKILL_PROMPT = """
 2. 高级查询（对象）：
 "search_query": {
     "query": "关键词，只能包含1个词（例如：A股、港股、芯片）。如果想浏览最新新闻，请使用空字符串 \\\"\\\" 或 ALL",
-    "category": "可选，新闻分类过滤。可用值：china_finance, finance, international, tech, defense, asia, europe, research, middle_east"
+    "category": "可选，新闻分类过滤。可用值：china_finance, finance, international, tech, defense, asia, europe, research, middle_east",
+    "source": "可选，新闻来源过滤，例如：财联社电报、Reuters Business、Bloomberg Markets",
+    "days": "可选，最近几天，建议 1 到 3"
 }
 
 规则：
@@ -55,6 +70,7 @@ SKILL_PROMPT = """
 - 如果搜索不到结果，优先改用浏览模式："search_query": {"query": "", "category": "china_finance"}
 - 如果要浏览全部最新新闻，也可以用 "ALL" 作为 query
 - 中国股市/投资议题优先使用 category="china_finance" 浏览最新新闻，而不是反复搜索 A股/港股 这类可能为空的关键词
+- 如果浏览过某个 category 仍没有新增信息，不要重复同一个 browse 参数，改换其他 category / source 或直接结束
 - 如果不需要搜索，**不要**添加该字段
 - 搜索完成后系统会将结果返回给你，届时请基于搜索结果重新组织完整回答"""
 

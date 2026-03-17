@@ -104,3 +104,14 @@ async def test_tavily_search_falls_back_to_recent_when_local_search_has_no_resul
     assert result["result_count"] == 1
     assert "关键词未命中" in result["summary"]
     assert "China finance fallback" in result["summary"]
+
+
+def test_parse_local_news_command_supports_recent_modes():
+    assert search.parse_local_news_command("ALL") == ("", None, "ALL")
+    assert search.parse_local_news_command("RECENT") == ("", None, "ALL")
+    assert search.parse_local_news_command("RECENT:china_finance") == (
+        "",
+        "china_finance",
+        "RECENT:china_finance",
+    )
+    assert search.parse_local_news_command("A股") == ("A股", None, "A股")

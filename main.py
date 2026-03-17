@@ -59,7 +59,7 @@ def _render_final_report_markdown(report) -> str:
 async def _research_phase_cli(topic: str, background: str | None, env_path: str | None = None) -> str:
     """Run the research phase via CLI, similar to web_server._research_phase."""
     from openai import AsyncOpenAI
-    from search import tavily_search, get_search_api_url
+    from search import get_search_api_url, parse_local_news_command, tavily_search
 
     if not get_search_api_url():
         logger.warning("No search backend configured — skipping web search")
@@ -73,8 +73,13 @@ async def _research_phase_cli(topic: str, background: str | None, env_path: str 
     model = config.moderator_llm.model
 
     max_searches = 20
+    research_max_results = 10
     collected_info: list[str] = []
     searched_queries: list[str] = []
+    seen_commands: set[str] = set()
+    seen_urls: set[str] = set()
+    no_progress_rounds = 0
+    last_feedback: str | None = None
 
     print("🔍 Moderator is researching background information...")
 
@@ -89,19 +94,23 @@ async def _research_phase_cli(topic: str, background: str | None, env_path: str 
         if collected_info:
             prompt += f"\n{_t('已搜集到的信息', 'Collected information so far')}：\n{''.join(collected_info[-3:])}\n"
         if searched_queries:
-            prompt += f"\n{_t('已搜索过的关键词', 'Previously searched keywords')}：{', '.join(searched_queries)}\n"
+            prompt += f"\n{_t('已执行过的搜索/浏览指令', 'Previously executed search/browse commands')}：{', '.join(searched_queries)}\n"
+        if last_feedback:
+            prompt += f"\n{_t('上一次搜索反馈', 'Last search feedback')}：{last_feedback}\n"
         prompt += (
             f"\n{_t('请判断是否还需要搜索更多信息。本地搜索不限次数，请尽可能搜索所有你需要的信息。', 'Please decide whether more searching is needed. Local search is unlimited — search as much as you need.')}\n"
             f"{_t('如果信息已经足够充分，回复：DONE', 'If information is sufficient, reply: DONE')}\n"
-            f"{_t('如果还需搜索，回复一个搜索关键词（只能是1个词，例如：A股、港股、芯片、关税、新能源、半导体、黄金）。只回复一个词，不要多个词，不要写句子。', 'If more search is needed, reply with exactly ONE keyword (e.g.: stocks, tariffs, chips, oil, gold, semiconductor). Only one word, no phrases, no sentences.')}\n"
-            f"{_t('提示：如果关键词搜索不到结果，直接回复 ALL 来浏览最新新闻；对于中国股市议题，浏览最新财经新闻通常比搜索 A股/港股 更有效。', 'Tip: if a keyword returns no results, reply ALL to browse latest news; for China market topics, browsing recent finance news is often better than searching A-share/HK-stock keywords.')}"
+            f"{_t('如果还需搜索，你只能回复以下三种格式之一：1）一个搜索关键词（只能1个词）；2）ALL；3）RECENT:category。不要回复句子。', 'If more search is needed, reply in exactly one of these forms: 1) one single-word keyword; 2) ALL; 3) RECENT:category. Do not reply with sentences.')}\n"
+            f"{_t('可用 category 例如：china_finance、finance、international、tech、defense、asia、europe、research、middle_east。', 'Available categories include: china_finance, finance, international, tech, defense, asia, europe, research, middle_east.')}\n"
+            f"{_t('重要：不要重复任何已经执行过的指令。ALL 或 RECENT:china_finance 这类浏览指令如果已经执行过，就必须换别的 category 或直接回复 DONE。', 'Important: do not repeat any command that has already been executed. If ALL or RECENT:china_finance has already been used, switch to another category or reply DONE.')}\n"
+            f"{_t('对于中国股市/投资议题，优先使用 RECENT:china_finance 浏览最新财经新闻，而不是反复搜索 A股、港股。', 'For China market topics, prefer RECENT:china_finance to browse recent finance news instead of repeating A-share or HK-stock keywords.')}"
         )
 
         try:
             resp = await client.chat.completions.create(
                 model=model,
                 messages=[
-                    {"role": "system", "content": t(topic, "你是本地新闻数据库(Local News API)搜索助手。你有两种模式：1）关键词搜索：回复1个词；2）新闻浏览：回复 ALL，系统会改走 /recent 获取最新新闻。规则：每次只能回复一个词或 ALL 或 DONE，不能回复句子。对于中国股市/投资议题，如果 A股、港股 等关键词搜不到结果，应尽快改用 ALL 浏览最新新闻。", "You are a Local News API search assistant. You have two modes: 1) keyword search: reply with one word; 2) browse latest news: reply ALL and the system will use /recent. Rule: reply with exactly one word, ALL, or DONE. For China market topics, if A-share/HK-stock keywords return no results, switch to ALL quickly.")},
+                    {"role": "system", "content": t(topic, "你是本地新闻数据库(Local News API)搜索助手。你有三种模式：1）关键词搜索：回复1个词；2）浏览全部最新新闻：回复 ALL；3）按分类浏览最新新闻：回复 RECENT:category，例如 RECENT:china_finance、RECENT:tech。系统会把 ALL / RECENT:* 转成 /recent 接口。规则：不能重复已经执行过的指令；如果某次搜索没有新增信息，应该改用不同 category 或直接回复 DONE。", "You are a Local News API search assistant. You have three modes: 1) keyword search with one word; 2) browse all recent news with ALL; 3) browse recent news by category with RECENT:category, e.g. RECENT:china_finance or RECENT:tech. The system maps ALL / RECENT:* to /recent. Do not repeat commands that have already been executed; if a search yields no new information, switch category or reply DONE.")},
                     {"role": "user", "content": prompt},
                 ],
                 temperature=0.3,
@@ -115,15 +124,41 @@ async def _research_phase_cli(topic: str, background: str | None, env_path: str 
             print("🔍 Moderator determined information is sufficient.")
             break
 
+        actual_query, actual_category, command_key = parse_local_news_command(query)
+        if command_key in seen_commands:
+            print(f"🔍 Moderator repeated the same command: {query}. Stopping to avoid fetching the same news repeatedly.")
+            break
+
         searched_queries.append(query)
-        # Convert "ALL" to empty query to fetch all latest news
-        actual_query = "" if query.upper() == "ALL" else query
+        seen_commands.add(command_key)
         print(f"🔍 Search #{i + 1}: {query}")
 
         try:
-            result = await tavily_search(query=actual_query, max_results=5, topic="news")
-            collected_info.append(result["summary"])
-            print(f"  → Found {result['result_count']} results")
+            result = await tavily_search(
+                query=actual_query,
+                category=actual_category,
+                max_results=research_max_results,
+                topic="news",
+            )
+            result_urls = {r.get("url", "") for r in result.get("results", []) if r.get("url")}
+            new_urls = result_urls - seen_urls
+
+            if new_urls:
+                seen_urls.update(new_urls)
+                no_progress_rounds = 0
+                last_feedback = None
+                collected_info.append(result["summary"])
+                print(f"  → Found {result['result_count']} results")
+            else:
+                no_progress_rounds += 1
+                last_feedback = (
+                    f"Command {query} produced no new news items. Do not repeat it; "
+                    "use a different category or reply DONE."
+                )
+                print(f"  → {last_feedback}")
+                if no_progress_rounds >= 2:
+                    print("🔍 Two consecutive searches produced no new information. Stopping.")
+                    break
         except Exception as e:
             logger.warning("Search failed for query '%s': %s", query, e)
 
