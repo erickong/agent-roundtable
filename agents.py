@@ -1,5 +1,6 @@
 """Agent interfaces for the Roundtable Meeting System V1."""
 
+import json
 import logging
 from typing import Any, Callable, Coroutine, Dict, Optional
 
@@ -10,7 +11,13 @@ from config import LLMProviderConfig
 from models import AgentMessage, RoundScore, RoundSummary, FinalReport, FinalScore
 from parser import parse_json_response, safe_parse_agent_output
 from i18n import LANG_FOLLOW_INSTRUCTION
-from skills.web_search import SKILL_PROMPT as SEARCH_SKILL_PROMPT, SEARCH_REFINE_PROMPT
+from skills.web_search import (
+    SEARCH_DUPLICATE_PROMPT,
+    SEARCH_ERROR_PROMPT,
+    SEARCH_FINAL_ONLY_PROMPT,
+    SEARCH_REFINE_PROMPT,
+    SKILL_PROMPT as SEARCH_SKILL_PROMPT,
+)
 from prompts import (
     MODERATOR_OPENING_PROMPT,
     MODERATOR_SUMMARY_PROMPT,
@@ -24,6 +31,40 @@ from prompts import (
 logger = logging.getLogger(__name__)
 
 MAX_RETRIES = 1
+MAX_AGENT_SEARCHES = 5
+DEFAULT_AGENT_SEARCH_RESULTS = 20
+
+
+def _build_search_request(search_query: Any) -> tuple[dict[str, Any], str, str]:
+    if isinstance(search_query, dict):
+        params = dict(search_query)
+    else:
+        params = {"query": str(search_query)}
+
+    query_value = str(params.get("query", "") or "")
+    if query_value.upper() == "ALL":
+        params["query"] = ""
+    if not params.get("max_results"):
+        params["max_results"] = DEFAULT_AGENT_SEARCH_RESULTS
+
+    display = query_value or "ALL"
+    if not params.get("query") and params.get("category"):
+        display = f"RECENT:{params['category']}"
+    if params.get("source"):
+        display = f"{display} @ {params['source']}"
+
+    request_key = json.dumps(
+        {
+            "query": params.get("query", ""),
+            "category": params.get("category"),
+            "source": params.get("source"),
+            "days": params.get("days"),
+            "max_results": params.get("max_results"),
+        },
+        ensure_ascii=False,
+        sort_keys=True,
+    )
+    return params, display, request_key
 
 
 def create_client(provider: LLMProviderConfig) -> AsyncOpenAI:
@@ -123,48 +164,98 @@ class ExpertAgent(BaseMeetingAgent):
     async def _speak_with_search(
         self, prompt: str, expected_keys: list[str], round_index: int,
     ) -> AgentMessage:
-        """Two-phase speak: LLM responds, optionally searches, then refines."""
+        """Multi-step speak: LLM may search up to MAX_AGENT_SEARCHES times, then answer."""
         raw = await self._call_llm(prompt)
         content = safe_parse_agent_output(raw, expected_keys + ["search_query"])
 
-        search_info = None
-        search_query = content.pop("search_query", None) if isinstance(content, dict) else None
+        search_info: list[dict[str, Any]] = []
+        search_history: list[str] = []
+        seen_requests: set[str] = set()
 
-        if search_query and self.search_fn:
-            try:
-                if isinstance(search_query, dict):
-                    search_result = await self.search_fn(**search_query)
-                    query_display = search_query.get("query", "")
-                    if not query_display:
-                        query_display = "ALL"
-                else:
-                    search_result = await self.search_fn(search_query)
-                    query_display = str(search_query)
+        if self.search_fn:
+            for search_index in range(MAX_AGENT_SEARCHES):
+                search_query = content.pop("search_query", None) if isinstance(content, dict) else None
+                if not search_query:
+                    break
 
-                search_info = {
-                    "query": search_query,
-                    "result_count": search_result.get("result_count", 0),
-                }
-                logger.info("[%s] Round %d search: '%s' → %d results",
-                            self.name, round_index, query_display, search_info["result_count"])
-                # Second pass: re-call LLM with search results
-                refine_suffix = SEARCH_REFINE_PROMPT.format(
-                    query=query_display, summary=search_result.get("summary", ""),
-                )
-                raw = await self._call_llm(prompt + refine_suffix)
-                content = safe_parse_agent_output(raw, expected_keys)
-                # Remove search_query from refined output if present
-                if isinstance(content, dict):
-                    content.pop("search_query", None)
-            except Exception as e:
-                logger.warning("[%s] Search failed for '%s': %s", self.name, search_query, e)
+                params, query_display, request_key = _build_search_request(search_query)
+                remaining_searches = MAX_AGENT_SEARCHES - search_index - 1
+
+                if request_key in seen_requests:
+                    logger.info("[%s] Round %d duplicate search skipped: '%s'", self.name, round_index, query_display)
+                    search_history.append(
+                        SEARCH_DUPLICATE_PROMPT.format(
+                            query=query_display,
+                            remaining_searches=remaining_searches,
+                        )
+                    )
+                    if remaining_searches == 0:
+                        search_history.append(SEARCH_FINAL_ONLY_PROMPT)
+                        raw = await self._call_llm(prompt + "".join(search_history))
+                        content = safe_parse_agent_output(raw, expected_keys)
+                        break
+                    raw = await self._call_llm(prompt + "".join(search_history))
+                    content = safe_parse_agent_output(raw, expected_keys + ["search_query"])
+                    continue
+
+                seen_requests.add(request_key)
+
+                try:
+                    search_result = await self.search_fn(**params)
+                    search_info.append(
+                        {
+                            "query": query_display,
+                            "result_count": search_result.get("result_count", 0),
+                            "search_index": search_index + 1,
+                            "max_searches": MAX_AGENT_SEARCHES,
+                        }
+                    )
+                    logger.info(
+                        "[%s] Round %d search %d/%d: '%s' → %d results",
+                        self.name,
+                        round_index,
+                        search_index + 1,
+                        MAX_AGENT_SEARCHES,
+                        query_display,
+                        search_info[-1]["result_count"],
+                    )
+                    search_history.append(
+                        SEARCH_REFINE_PROMPT.format(
+                            query=query_display,
+                            summary=search_result.get("summary", ""),
+                            search_index=search_index + 1,
+                            max_searches=MAX_AGENT_SEARCHES,
+                            remaining_searches=remaining_searches,
+                        )
+                    )
+                except Exception as e:
+                    logger.warning("[%s] Search failed for '%s': %s", self.name, query_display, e)
+                    search_history.append(
+                        SEARCH_ERROR_PROMPT.format(
+                            query=query_display,
+                            error=e,
+                            remaining_searches=remaining_searches,
+                        )
+                    )
+
+                if remaining_searches == 0:
+                    search_history.append(SEARCH_FINAL_ONLY_PROMPT)
+                    raw = await self._call_llm(prompt + "".join(search_history))
+                    content = safe_parse_agent_output(raw, expected_keys)
+                    break
+
+                raw = await self._call_llm(prompt + "".join(search_history))
+                content = safe_parse_agent_output(raw, expected_keys + ["search_query"])
+
+        if isinstance(content, dict):
+            content.pop("search_query", None)
 
         return AgentMessage(
             round_index=round_index,
             agent_name=self.name,
             content=content,
             raw_text=raw,
-            search_info=search_info,
+            search_info=search_info or None,
         )
 
     def retitle(self, title: str):

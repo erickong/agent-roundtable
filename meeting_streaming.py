@@ -228,13 +228,16 @@ class StreamingMeeting:
             messages.append(result)
             # Emit search event if the expert used the search skill
             if result.search_info:
-                await self._emit({
-                    "type": "agent_search",
-                    "agent": expert.name,
-                    "round": round_num,
-                    "query": result.search_info["query"],
-                    "result_count": result.search_info["result_count"],
-                })
+                for search_meta in result.search_info:
+                    await self._emit({
+                        "type": "agent_search",
+                        "agent": expert.name,
+                        "round": round_num,
+                        "query": search_meta["query"],
+                        "result_count": search_meta["result_count"],
+                        "search_index": search_meta.get("search_index"),
+                        "max_searches": search_meta.get("max_searches"),
+                    })
             # Format content nicely
             if result.content:
                 content_str = json.dumps(result.content, ensure_ascii=False, indent=2)

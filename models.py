@@ -20,7 +20,7 @@ class AgentMessage:
     agent_name: str
     content: Dict[str, Any]
     raw_text: str = ""
-    search_info: Optional[Dict[str, Any]] = None  # {"query": str, "result_count": int}
+    search_info: Optional[List[Dict[str, Any]]] = None  # [{"query": str, "result_count": int, ...}]
 
 
 @dataclass

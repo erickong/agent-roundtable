@@ -734,10 +734,13 @@ function createMsgElement(msg) {
   if (msg.type === 'agent_search') {
     div.className = 'msg';
     const color = getAgentColor(msg.agent);
+    const searchLabel = msg.search_index && msg.max_searches
+      ? `Search ${msg.search_index}/${msg.max_searches}`
+      : 'Search';
     div.innerHTML = `
       <div class="avatar" style="background:${color}">${getAgentInitial(msg.agent)}</div>
       <div class="bubble" style="background:var(--bubble-system);border-left:3px solid ${color}">
-        <div class="sender-name">${escapeHtml(msg.agent)} · 🔍 Search</div>
+        <div class="sender-name">${escapeHtml(msg.agent)} · 🔍 ${escapeHtml(searchLabel)}</div>
         <div class="msg-content" style="font-size:0.92em;color:#555">"${escapeHtml(msg.query)}" → ${msg.result_count} results</div>
       </div>`;
     return div;
