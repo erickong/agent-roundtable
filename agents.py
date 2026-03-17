@@ -135,7 +135,8 @@ class ExpertAgent(BaseMeetingAgent):
                 if isinstance(search_query, dict):
                     search_result = await self.search_fn(**search_query)
                     query_display = search_query.get("query", "")
-                    if not query_display: query_display = "ALL"
+                    if not query_display:
+                        query_display = "ALL"
                 else:
                     search_result = await self.search_fn(search_query)
                     query_display = str(search_query)

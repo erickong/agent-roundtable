@@ -1,4 +1,4 @@
-"""Web search skill — allows agents to search for real-time information.
+"""Local news search skill — allows agents to query the local news database.
 
 Each agent may use this skill at most once per round to:
 - Support or verify their own arguments with facts
@@ -9,7 +9,7 @@ Each agent may use this skill at most once per round to:
 import logging
 from typing import Optional
 
-from search import tavily_search, get_search_api_url
+from search import get_search_api_url, tavily_search
 
 logger = logging.getLogger(__name__)
 
@@ -25,7 +25,7 @@ async def execute(query: str = "", category: Optional[str] = None, max_results: 
     Returns:
         Dict with 'results', 'answer', 'summary', and 'result_count'.
     """
-    # Convert "ALL" to empty query to fetch all latest news
+    # Convert "ALL" to empty query so browse mode uses /recent on the local API.
     actual_query = "" if query.upper() == "ALL" else query
     return await tavily_search(query=actual_query, category=category, max_results=max_results, topic="news")
 
@@ -43,8 +43,8 @@ SKILL_PROMPT = """
 1. 关键词查询（字符串）："search_query": "关税"
 2. 高级查询（对象）：
 "search_query": {
-  "query": "关键词，只能包含1个词（例如：A股、港股、芯片）。如果想获取最新全部新闻，请使用空字符串 \\"\\"",
-  "category": "可选，新闻分类过滤。例如：china_finance, finance, international, tech, defense, asia, europe"
+    "query": "关键词，只能包含1个词（例如：A股、港股、芯片）。如果想浏览最新新闻，请使用空字符串 \\\"\\\" 或 ALL",
+    "category": "可选，新闻分类过滤。可用值：china_finance, finance, international, tech, defense, asia, europe, research, middle_east"
 }
 
 规则：
@@ -52,7 +52,9 @@ SKILL_PROMPT = """
 - query 只能是1个词（只支持单个关键词查询）
 - 好的例子：「A股」「港股」「芯片」「关税」「新能源」「黄金」「半导体」
 - 坏的例子（不要这样写）：「AI芯片市场」「原油价格走势」「全球半导体投资」
-- 如果搜索不到结果，可以用 "ALL" 作为 query 来获取最新全部新闻
+- 如果搜索不到结果，优先改用浏览模式："search_query": {"query": "", "category": "china_finance"}
+- 如果要浏览全部最新新闻，也可以用 "ALL" 作为 query
+- 中国股市/投资议题优先使用 category="china_finance" 浏览最新新闻，而不是反复搜索 A股/港股 这类可能为空的关键词
 - 如果不需要搜索，**不要**添加该字段
 - 搜索完成后系统会将结果返回给你，届时请基于搜索结果重新组织完整回答"""
 

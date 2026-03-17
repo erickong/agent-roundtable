@@ -186,14 +186,14 @@ async def _research_phase(
             f"\n{_t('请判断是否还需要搜索更多信息。本地搜索不限次数，请尽可能搜索所有你需要的信息。', 'Please decide whether more searching is needed. Local search is unlimited — search as much as you need.')}\n"
             f"{_t('如果信息已经足够充分，回复：DONE', 'If information is sufficient, reply: DONE')}\n"
             f"{_t('如果还需搜索，回复一个搜索关键词（只能是1个词，例如：A股、港股、芯片、关税、新能源、半导体、黄金）。只回复一个词，不要多个词，不要写句子。', 'If more search is needed, reply with exactly ONE keyword (e.g.: stocks, tariffs, chips, oil, gold, semiconductor). Only one word, no phrases, no sentences.')}\n"
-            f"{_t('提示：如果关键词搜索不到结果，可以回复 ALL 来获取最新全部新闻。', 'Tip: if keyword search returns no results, reply ALL to fetch all latest news.')}"
+            f"{_t('提示：如果关键词搜索不到结果，直接回复 ALL 来浏览最新新闻；对于中国股市议题，浏览最新财经新闻通常比搜索 A股/港股 更有效。', 'Tip: if a keyword returns no results, reply ALL to browse latest news; for China market topics, browsing recent finance news is often better than searching A-share/HK-stock keywords.')}"
         )
 
         try:
             resp = await moderator_client.chat.completions.create(
                 model=model,
                 messages=[
-                    {"role": "system", "content": t(topic, "你是本地新闻数据库(Local News API)搜索助手。你的任务是将议题拆解为多个搜索词，逐次搜索新闻数据库。可用分类(category)包括: china_finance, finance, international, tech, defense 等。规则：每次只能回复1个词作为搜索词，或回复DONE表示搜索结束。搜索不限次数，请尽量覆盖所有相关关键词。提示：如果需要获取最新无过滤新闻，请回复 ALL。", "You are a Local News API search assistant. Break topics into individual keywords for sequential database searches. Available categories: china_finance, finance, tech, etc. Rule: reply with exactly ONE word as search keyword, or DONE to finish. No limit on searches. Tip: empty/ALL returns latest news.")},
+                    {"role": "system", "content": t(topic, "你是本地新闻数据库(Local News API)搜索助手。你有两种模式：1）关键词搜索：回复1个词；2）新闻浏览：回复 ALL，系统会改走 /recent 获取最新新闻。规则：每次只能回复一个词或 ALL 或 DONE，不能回复句子。对于中国股市/投资议题，如果 A股、港股 等关键词搜不到结果，应尽快改用 ALL 浏览最新新闻。", "You are a Local News API search assistant. You have two modes: 1) keyword search: reply with one word; 2) browse latest news: reply ALL and the system will use /recent. Rule: reply with exactly one word, ALL, or DONE. For China market topics, if A-share/HK-stock keywords return no results, switch to ALL quickly.")},
                     {"role": "user", "content": prompt},
                 ],
                 temperature=0.3,
