@@ -147,7 +147,7 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
         # Keep _meeting_histories — it persists for reconnections
 
 
-MAX_SEARCH_ROUNDS = 5
+MAX_SEARCH_ROUNDS = 20
 
 
 async def _research_phase(
@@ -183,17 +183,16 @@ async def _research_phase(
             prompt += f"\n{_t('已搜索过的关键词', 'Previously searched keywords')}：{', '.join(searched_queries)}\n"
 
         prompt += (
-            f"\n{_t(f'这是第 {i + 1}/{MAX_SEARCH_ROUNDS} 次搜索机会。', f'This is search opportunity {i + 1}/{MAX_SEARCH_ROUNDS}.')}"
-            f"{_t('请判断是否还需要搜索更多信息。', 'Please decide whether more searching is needed.')}\n"
+            f"\n{_t('请判断是否还需要搜索更多信息。本地搜索不限次数，请尽可能搜索所有你需要的信息。', 'Please decide whether more searching is needed. Local search is unlimited — search as much as you need.')}\n"
             f"{_t('如果信息已经足够充分，回复：DONE', 'If information is sufficient, reply: DONE')}\n"
-            f"{_t('如果还需搜索，回复一个精简的搜索关键词（1-3个词，像查数据库一样简短，例如：A股、港股、芯片、关税、新能源）。不要回复其他内容，不要写完整句子。', 'If more search is needed, reply with 1-3 short keywords (like a database search, e.g.: stocks, tariffs, chips, oil). No other text, no full sentences.')}"
+            f"{_t('如果还需搜索，回复一个搜索关键词（只能是1个词，例如：A股、港股、芯片、关税、新能源、半导体、黄金）。只回复一个词，不要多个词，不要写句子。', 'If more search is needed, reply with exactly ONE keyword (e.g.: stocks, tariffs, chips, oil, gold, semiconductor). Only one word, no phrases, no sentences.')}"
         )
 
         try:
             resp = await moderator_client.chat.completions.create(
                 model=model,
                 messages=[
-                    {"role": "system", "content": t(topic, "你是新闻数据库搜索助手。你的任务是将议题拆解为多个简短搜索词（每次1-3个词），逐次搜索新闻数据库。注意：这不是谷歌搜索引擎，不能输入长句子，必须用精简关键词。每次只回复一个搜索词或DONE。", "You are a news database search assistant. Break topics into short keywords (1-3 words each) for sequential database searches. This is NOT a web search engine — long sentences won't work. Reply with one short keyword or DONE.")},
+                    {"role": "system", "content": t(topic, "你是新闻数据库搜索助手。你的任务是将议题拆解为多个搜索词，逐次搜索新闻数据库。规则：每次只能回复1个词作为搜索词，或回复DONE表示搜索结束。搜索不限次数，请尽量覆盖所有相关关键词。", "You are a news database search assistant. Break topics into individual keywords for sequential database searches. Rule: reply with exactly ONE word as search keyword, or DONE to finish. No limit on searches — cover all relevant keywords.")},
                     {"role": "user", "content": prompt},
                 ],
                 temperature=0.3,
@@ -208,7 +207,7 @@ async def _research_phase(
             break
 
         searched_queries.append(query)
-        await send_event({"type": "search_start", "content": f"🔍 {t(topic, '搜索', 'Search')} ({i + 1}/{MAX_SEARCH_ROUNDS}): {query}"})
+        await send_event({"type": "search_start", "content": f"🔍 {t(topic, '搜索', 'Search')} #{i + 1}: {query}"})
 
         try:
             result = await tavily_search(query=query, max_results=5, topic="news")
