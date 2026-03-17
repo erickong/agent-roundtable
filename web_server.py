@@ -14,7 +14,14 @@ from models import MeetingInput
 from agents import ModeratorAgent, ExpertAgent
 from meeting_streaming import StreamingMeeting
 from i18n import t, get_default_experts, is_chinese, LANG_FOLLOW_INSTRUCTION
-from search import get_search_api_url, parse_local_news_command, tavily_search
+from search import (
+    fetch_webpage_content,
+    get_search_api_url,
+    get_web_search_api_url,
+    parse_research_command,
+    tavily_search,
+    web_search,
+)
 from skills.web_search import execute as skill_web_search, is_available as skill_search_available
 
 from openai import AsyncOpenAI
@@ -46,10 +53,13 @@ def _validate_startup_configuration(target_app: FastAPI) -> MeetingConfig:
     logger.info("✓ Expert providers: %d configured", len(config.expert_providers))
     for i, provider in enumerate(config.expert_providers, 1):
         logger.info("  Provider %d: %s (%s) weight=%d", i, provider.name, provider.model, provider.weight)
-    search_url = get_search_api_url()
-    if search_url:
-        logger.info("✓ Search backend: %s", search_url)
-    else:
+    local_search_url = get_search_api_url()
+    web_search_url = get_web_search_api_url()
+    if local_search_url:
+        logger.info("✓ Local search backend: %s", local_search_url)
+    if web_search_url:
+        logger.info("✓ Web search backend: %s", web_search_url)
+    if not local_search_url and not web_search_url:
         logger.warning("✗ No search backend configured — web search disabled")
 
     target_app.state.config_validated = True
@@ -193,17 +203,18 @@ async def _research_phase(
         prompt += (
             f"\n{_t('请判断是否还需要搜索更多信息。本地搜索不限次数，请尽可能搜索所有你需要的信息。', 'Please decide whether more searching is needed. Local search is unlimited — search as much as you need.')}\n"
             f"{_t('如果信息已经足够充分，回复：DONE', 'If information is sufficient, reply: DONE')}\n"
-            f"{_t('如果还需搜索，你只能回复以下三种格式之一：1）一个搜索关键词（只能1个词）；2）ALL；3）RECENT:category。不要回复句子。', 'If more search is needed, reply in exactly one of these forms: 1) one single-word keyword; 2) ALL; 3) RECENT:category. Do not reply with sentences.')}\n"
+            f"{_t('如果还需搜索，你只能回复以下五种格式之一：1）一个本地新闻关键词（只能1个词）；2）ALL；3）RECENT:category；4）WEB:查询语句；5）FETCH:url。不要回复句子。', 'If more search is needed, reply in exactly one of these forms: 1) one local-news keyword; 2) ALL; 3) RECENT:category; 4) WEB:search terms; 5) FETCH:url. Do not reply with sentences.')}\n"
             f"{_t('可用 category 例如：china_finance、finance、international、tech、defense、asia、europe、research、middle_east。', 'Available categories include: china_finance, finance, international, tech, defense, asia, europe, research, middle_east.')}\n"
             f"{_t('重要：不要重复任何已经执行过的指令。ALL 或 RECENT:china_finance 这类浏览指令如果已经执行过，就必须换别的 category 或直接回复 DONE。', 'Important: do not repeat any command that has already been executed. If ALL or RECENT:china_finance has already been used, switch to another category or reply DONE.')}\n"
-            f"{_t('默认先做 1-2 次关键词搜索，不要一开始就用 ALL 或 RECENT。只有在关键词没有结果，或者你需要市场全景时，才切换到 RECENT:category。', 'Start with 1-2 keyword searches by default. Do not use ALL or RECENT first. Switch to RECENT:category only if keyword search has no results or you need a broad market overview.')}"
+            f"{_t('策略：最近市场新闻优先用本地新闻关键词；股票基本面、东方财富/雪球/公告/券商研报优先用 WEB: 查询；当你已经找到一个高价值网页 URL 时，用 FETCH:url 获取正文。', 'Strategy: use local-news keywords for recent market news; use WEB: for fundamentals, Eastmoney/Xueqiu/announcements/research; when you already have a valuable URL, use FETCH:url to read the page.')}\n"
+            f"{_t('默认先做 1-2 次关键词搜索，不要一开始就用 ALL 或 RECENT。本地浏览模式只在本地关键词没有结果或需要市场全景时使用；WEB: 可以在明确需要外部资料时直接使用。', 'Start with 1-2 keyword searches by default. Do not use ALL or RECENT first. Local browse mode should be used only after local keyword misses or for broad market overview; WEB: may be used directly when external information is clearly needed.')}"
         )
 
         try:
             resp = await moderator_client.chat.completions.create(
                 model=model,
                 messages=[
-                    {"role": "system", "content": t(topic, "你是本地新闻数据库(Local News API)搜索助手。你有三种模式：1）关键词搜索：回复1个词；2）浏览全部最新新闻：回复 ALL；3）按分类浏览最新新闻：回复 RECENT:category，例如 RECENT:china_finance、RECENT:tech。系统会把 ALL / RECENT:* 转成 /recent 接口。策略：默认先做关键词搜索，不要一开始就用 ALL 或 RECENT。只有在至少一次关键词搜索后，且关键词没有命中，或者你明确需要全景浏览时，才使用 RECENT。", "You are a Local News API search assistant. You have three modes: 1) one-word keyword search; 2) browse all recent news with ALL; 3) browse recent news by category with RECENT:category, e.g. RECENT:china_finance or RECENT:tech. The system maps ALL / RECENT:* to /recent. Strategy: start with keyword search by default, not ALL or RECENT. Use RECENT only after at least one keyword search has been attempted and did not hit, or when a broad overview is clearly needed.")},
+                    {"role": "system", "content": t(topic, "你是研究助手。你有五种模式：1）本地新闻关键词搜索：回复1个词；2）浏览全部最新新闻：回复 ALL；3）按分类浏览最新新闻：回复 RECENT:category；4）开放网页搜索：回复 WEB:查询语句；5）网页获取：回复 FETCH:url。系统会把 ALL / RECENT:* 转到本地 /recent，把 WEB: 转到 Tavily 类网页搜索，把 FETCH: 转到网页正文抓取。不要重复指令；如果需要东方财富、雪球、公司公告、财务指标、券商评级等数据库之外的信息，应主动使用 WEB: 或 FETCH:。", "You are a research assistant. You have five modes: 1) one-word local news keyword search; 2) browse all recent news with ALL; 3) browse recent news by category with RECENT:category; 4) open-web search with WEB:query; 5) webpage fetch with FETCH:url. ALL / RECENT:* go to the local /recent API, WEB: goes to open-web search, and FETCH: reads the page body. Do not repeat commands. Use WEB: or FETCH: when you need Eastmoney/Xueqiu/announcements/fundamentals beyond the local database.")},
                     {"role": "user", "content": prompt},
                 ],
                 temperature=0.3,
@@ -217,8 +228,14 @@ async def _research_phase(
             await send_event({"type": "system", "content": t(topic, "🔍 仲裁者判断信息已充分，结束搜索。", "🔍 Moderator determined information is sufficient.")})
             break
 
-        actual_query, actual_category, command_key = parse_local_news_command(query)
-        if not actual_query and keyword_searches == 0:
+        command = parse_research_command(query)
+        backend = command["backend"]
+        actual_query = command["query"] or ""
+        actual_category = command["category"]
+        actual_url = command["url"]
+        command_key = command["command_key"] or query
+
+        if backend == "local" and not actual_query and keyword_searches == 0:
             last_feedback = t(topic, "请先尝试一个关键词搜索，不要一开始就使用 ALL 或 RECENT。", "Please try one keyword search first; do not start with ALL or RECENT.")
             await send_event({"type": "system", "content": f"🔍 {last_feedback}"})
             continue
@@ -231,22 +248,33 @@ async def _research_phase(
         await send_event({"type": "search_start", "content": f"🔍 {t(topic, '搜索', 'Search')} #{i + 1}: {query}"})
 
         try:
-            result = await tavily_search(
-                query=actual_query,
-                category=actual_category,
-                max_results=RESEARCH_MAX_RESULTS,
-                topic="news",
-            )
-            if actual_query:
-                keyword_searches += 1
+            if backend == "local":
+                result = await tavily_search(
+                    query=actual_query,
+                    category=actual_category,
+                    max_results=RESEARCH_MAX_RESULTS,
+                    topic="news",
+                )
+                if actual_query:
+                    keyword_searches += 1
+            elif backend == "web":
+                result = await web_search(
+                    query=actual_query,
+                    max_results=8,
+                    search_depth="advanced",
+                    topic="general",
+                )
+            else:
+                result = await fetch_webpage_content(actual_url or "")
+
             result_urls = {r.get("url", "") for r in result.get("results", []) if r.get("url")}
             new_urls = result_urls - seen_urls
 
-            if actual_query and result.get("result_count", 0) == 0:
+            if backend == "local" and actual_query and result.get("result_count", 0) == 0:
                 last_feedback = t(
                     topic,
-                    f"关键词 {query} 没有搜索到结果。先换一个更短的关键词；如果接下来仍无结果，再改用 RECENT:category。",
-                    f"Keyword {query} returned no results. Try another short keyword first; if it still fails, then switch to RECENT:category.",
+                    f"关键词 {query} 没有搜索到结果。可先换一个更短的关键词；如果需要数据库外的信息，也可以改用 WEB: 查询东方财富、雪球、公告、研报。",
+                    f"Keyword {query} returned no results. Try another short keyword first; if you need information beyond the local database, use WEB: for Eastmoney/Xueqiu/announcements/research.",
                 )
                 await send_event({
                     "type": "search_result",

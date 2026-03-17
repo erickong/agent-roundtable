@@ -1,46 +1,77 @@
-"""Local news search skill — allows agents to query the local news database.
+"""Research skill — allows agents to use local news, web search, and page fetch.
 
 Each agent may use this skill up to five times per round to:
 - Support or verify their own arguments with facts
 - Find evidence to critique others' arguments
-- Gather background knowledge (news, reports, etc.)
+- Gather recent local-news context and open-web fundamentals
 """
 
 import logging
 from typing import Optional
 
-from search import get_search_api_url, tavily_search
+from search import (
+    fetch_webpage_content,
+    get_search_api_url,
+    get_web_search_api_url,
+    tavily_search,
+    web_search,
+)
 
 logger = logging.getLogger(__name__)
 
 
 def is_available() -> bool:
-    """Check if a search backend is configured."""
-    return get_search_api_url() is not None
+    """Check if any research backend is configured."""
+    return get_search_api_url() is not None or get_web_search_api_url() is not None
 
 
 async def execute(
+    backend: str = "local",
     query: str = "",
+    url: Optional[str] = None,
     category: Optional[str] = None,
     source: Optional[str] = None,
     days: int = 3,
     max_results: int = 20,
+    search_depth: str = "advanced",
+    include_domains: Optional[list[str]] = None,
+    exclude_domains: Optional[list[str]] = None,
+    max_chars: int = 12000,
 ) -> dict:
-    """Run a web search and return results.
+    """Run a research operation and return results.
 
     Returns:
         Dict with 'results', 'answer', 'summary', and 'result_count'.
     """
-    # Convert "ALL" to empty query so browse mode uses /recent on the local API.
-    actual_query = "" if query.upper() == "ALL" else query
-    return await tavily_search(
-        query=actual_query,
-        category=category,
-        source=source,
-        days=days,
-        max_results=max_results,
-        topic="news",
-    )
+    normalized_backend = (backend or "local").strip().lower()
+
+    if normalized_backend == "local":
+        actual_query = "" if query.upper() == "ALL" else query
+        return await tavily_search(
+            query=actual_query,
+            category=category,
+            source=source,
+            days=days,
+            max_results=max_results,
+            topic="news",
+        )
+
+    if normalized_backend == "web":
+        return await web_search(
+            query=query,
+            max_results=max_results,
+            search_depth=search_depth,
+            topic="general",
+            include_domains=include_domains,
+            exclude_domains=exclude_domains,
+            days=days,
+        )
+
+    if normalized_backend == "fetch":
+        target_url = (url or query).strip()
+        return await fetch_webpage_content(target_url, max_chars=max_chars)
+
+    raise ValueError(f"Unknown research backend: {backend}")
 
 
 # Prompt instruction appended to expert prompts when search is enabled.
@@ -49,35 +80,59 @@ async def execute(
 
 SKILL_PROMPT = """
 
-## 可用技能：本地新闻数据库
-你拥有最多 5 次查询本地新闻数据库的机会。该数据库包含全球及中国金融、科技、国际、军事等最新新闻。
+## 可用技能：研究工具
+你拥有最多 5 次研究工具调用机会。研究工具分为三类：
+
+1. 本地新闻数据库（backend="local"）
+     适合：最近 1-3 天财经新闻、市场异动、政策消息、行业快讯。
+
+2. 开放网页搜索（backend="web"）
+     适合：东方财富、雪球、新浪财经、公司公告、券商研报、基本面资料、产业链分析。
+
+3. 网页获取（backend="fetch"）
+     适合：当你已经通过网页搜索找到一个高价值 URL，需要读取该页面正文时使用。
+
 如果你需要查找最新资料来支持论点、验证事实、或反驳他人观点，请在你的 JSON 输出中额外添加一个 "search_query" 字段。
-支持更精确的参数（你可以返回一个字符串或JSON对象）：
-1. 关键词查询（字符串）："search_query": "关税"
-2. 高级查询（对象）：
+你可以返回字符串或 JSON 对象：
+
+1. 本地新闻关键词（字符串，默认 backend=local）：
+"search_query": "关税"
+
+2. 本地新闻浏览（对象）：
 "search_query": {
-    "query": "关键词，只能包含1个词（例如：A股、港股、芯片）。如果想浏览最新新闻，请使用空字符串 \\\"\\\" 或 ALL",
-    "category": "可选，新闻分类过滤。可用值：china_finance, finance, international, tech, defense, asia, europe, research, middle_east",
-    "source": "可选，新闻来源过滤，例如：财联社电报、Reuters Business、Bloomberg Markets",
-    "days": "可选，最近几天，建议 1 到 3",
-    "max_results": "可选，默认 20"
+    "backend": "local",
+    "query": "",
+    "category": "china_finance",
+    "days": 3,
+    "max_results": 20
+}
+
+3. 开放网页搜索（对象）：
+"search_query": {
+    "backend": "web",
+    "query": "鹏鼎控股 世运电路 东方财富 2026年3月",
+    "include_domains": ["eastmoney.com", "sina.com.cn", "xueqiu.com"],
+    "max_results": 8
+}
+
+4. 网页获取（对象）：
+"search_query": {
+    "backend": "fetch",
+    "url": "https://caifuhao.eastmoney.com/news/..."
 }
 
 规则：
-- 每轮最多搜索 5 次
-- query 只能是1个词（只支持单个关键词查询）
-- 好的例子：「A股」「港股」「芯片」「关税」「新能源」「黄金」「半导体」
-- 坏的例子（不要这样写）：「AI芯片市场」「原油价格走势」「全球半导体投资」
-- 默认先做关键词搜索，不要一上来就用 ALL 或空 query 浏览
-- 如果搜索不到结果，优先改用浏览模式："search_query": {"query": "", "category": "china_finance"}
-- 如果要浏览全部最新新闻，也可以用 "ALL" 作为 query
-- 只有在至少尝试过 1 次关键词搜索之后，或你明确需要市场全景时，才使用浏览模式
-- 中国股市/投资议题在关键词没有结果时，优先使用 category="china_finance" 浏览最新新闻，而不是反复搜索 A股/港股 这类可能为空的关键词
-- 如果浏览过某个 category 仍没有新增信息，不要重复同一个 browse 参数，改换其他 category / source 或直接结束
-- 每次搜索默认返回 20 条新闻，通常不需要手动把 max_results 改小
-- 每次收到搜索结果后，如果信息还不够，你可以继续返回新的 search_query；如果信息足够，就直接输出最终回答，不要再带 search_query
+- 每轮最多调用 5 次研究工具
+- 默认先做关键词搜索，不要一上来就用 ALL 或空 query 浏览本地新闻
+- 本地新闻 query 只能是 1 个词；开放网页搜索 query 可以是自然语言短语
+- 研究股票投资价值、公司公告、财务指标、券商评级、东方财富/雪球页面时，优先使用 backend="web" 或 backend="fetch"
+- 只有在本地关键词没有结果，或者你需要市场全景时，才使用本地浏览模式（ALL 或 query=""）
+- 如果已经拿到一个高价值网页 URL，不要继续泛搜，直接用 backend="fetch" 获取页面正文
+- 如果浏览过某个 category 或抓取过某个 URL 仍没有新增信息，不要重复同一个参数
+- 本地新闻默认返回 20 条，开放网页搜索默认建议 8 条
+- 如果信息足够，就直接输出最终回答，不要再添加 search_query
 - 如果不需要搜索，**不要**添加该字段
-- 搜索完成后系统会将结果返回给你，届时请基于搜索结果重新组织完整回答"""
+"""
 
 
 SEARCH_REFINE_PROMPT = """

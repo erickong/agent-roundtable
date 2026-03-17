@@ -4,9 +4,11 @@ import search
 
 
 class FakeResponse:
-    def __init__(self, data, status_code=200):
+    def __init__(self, data=None, status_code=200, text="", headers=None):
         self._data = data
         self.status_code = status_code
+        self.text = text
+        self.headers = headers or {}
 
     def raise_for_status(self):
         if self.status_code >= 400:
@@ -27,11 +29,11 @@ class FakeAsyncClient:
     async def __aexit__(self, exc_type, exc, tb):
         return False
 
-    async def get(self, url, params=None):
-        return self.get_response(url, params)
+    async def get(self, url, params=None, **kwargs):
+        return self.get_response(url, params, **kwargs)
 
-    async def post(self, url, json=None):
-        return self.post_response(url, json)
+    async def post(self, url, json=None, **kwargs):
+        return self.post_response(url, json, **kwargs)
 
 
 @pytest.mark.anyio
@@ -100,3 +102,84 @@ def test_parse_local_news_command_supports_recent_modes():
         "RECENT:china_finance",
     )
     assert search.parse_local_news_command("A股") == ("A股", None, "A股")
+
+
+def test_parse_research_command_supports_web_and_fetch_modes():
+    assert search.parse_research_command("WEB:鹏鼎控股 世运电路 东方财富") == {
+        "backend": "web",
+        "query": "鹏鼎控股 世运电路 东方财富",
+        "category": None,
+        "url": None,
+        "command_key": "WEB:鹏鼎控股 世运电路 东方财富",
+        "display": "WEB:鹏鼎控股 世运电路 东方财富",
+    }
+    assert search.parse_research_command("FETCH:https://example.com/report") == {
+        "backend": "fetch",
+        "query": None,
+        "category": None,
+        "url": "https://example.com/report",
+        "command_key": "FETCH:https://example.com/report",
+        "display": "FETCH:https://example.com/report",
+    }
+
+
+@pytest.mark.anyio
+async def test_web_search_uses_open_web_backend(monkeypatch):
+    monkeypatch.setattr(search, "get_web_search_api_url", lambda: "https://api.tavily.com/search")
+    monkeypatch.setattr(search, "get_tavily_api_key", lambda: "test-key")
+
+    def build_client(*args, **kwargs):
+        return FakeAsyncClient(
+            post_response=lambda url, json, **kw: FakeResponse(
+                {
+                    "query": json["query"],
+                    "answer": "answer",
+                    "results": [
+                        {
+                            "title": "Eastmoney result",
+                            "url": "https://example.com/eastmoney",
+                            "content": "content",
+                        }
+                    ],
+                    "response_time": 0.01,
+                }
+            ),
+            get_response=lambda url, params, **kw: (_ for _ in ()).throw(AssertionError("GET should not be used for web search")),
+        )
+
+    monkeypatch.setattr(search.httpx, "AsyncClient", build_client)
+
+    result = await search.web_search(query="鹏鼎控股 世运电路 东方财富", max_results=3)
+
+    assert result["result_count"] == 1
+    assert "Eastmoney result" in result["summary"]
+
+
+@pytest.mark.anyio
+async def test_fetch_webpage_content_extracts_html_text(monkeypatch):
+    html = """
+    <html>
+      <head><title>测试页面</title></head>
+      <body>
+        <article><h1>标题</h1><p>第一段。</p><p>第二段。</p></article>
+        <script>ignored()</script>
+      </body>
+    </html>
+    """
+
+    def build_client(*args, **kwargs):
+        return FakeAsyncClient(
+            get_response=lambda url, params, **kw: FakeResponse(
+                text=html,
+                headers={"content-type": "text/html; charset=utf-8"},
+            ),
+            post_response=lambda url, json, **kw: (_ for _ in ()).throw(AssertionError("POST should not be used for webpage fetch")),
+        )
+
+    monkeypatch.setattr(search.httpx, "AsyncClient", build_client)
+
+    result = await search.fetch_webpage_content("https://example.com/report")
+
+    assert result["result_count"] == 1
+    assert "测试页面" in result["summary"]
+    assert "第一段。" in result["summary"]

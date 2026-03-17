@@ -34,6 +34,8 @@ logger = logging.getLogger(__name__)
 MAX_RETRIES = 1
 MAX_AGENT_SEARCHES = 5
 DEFAULT_AGENT_SEARCH_RESULTS = 20
+DEFAULT_AGENT_WEB_RESULTS = 8
+DEFAULT_AGENT_FETCH_CHARS = 12000
 
 
 def _build_search_request(search_query: Any) -> tuple[dict[str, Any], str, str]:
@@ -42,25 +44,53 @@ def _build_search_request(search_query: Any) -> tuple[dict[str, Any], str, str]:
     else:
         params = {"query": str(search_query)}
 
-    query_value = str(params.get("query", "") or "")
-    if query_value.upper() == "ALL":
-        params["query"] = ""
-    if not params.get("max_results"):
-        params["max_results"] = DEFAULT_AGENT_SEARCH_RESULTS
+    backend = str(params.get("backend", "local") or "local").strip().lower()
+    params["backend"] = backend
 
-    display = query_value or "ALL"
-    if not params.get("query") and params.get("category"):
-        display = f"RECENT:{params['category']}"
-    if params.get("source"):
-        display = f"{display} @ {params['source']}"
+    query_value = str(params.get("query", "") or "").strip()
+    url_value = str(params.get("url", "") or "").strip()
+
+    if backend == "fetch":
+        target_url = url_value or query_value
+        if not target_url:
+            raise ValueError("Fetch requests require a URL")
+        params["url"] = target_url
+        params["query"] = ""
+        if not params.get("max_chars"):
+            params["max_chars"] = DEFAULT_AGENT_FETCH_CHARS
+        display = f"FETCH:{target_url}"
+    elif backend == "web":
+        if not query_value:
+            raise ValueError("Web search requests require a query")
+        params["query"] = query_value
+        if not params.get("max_results"):
+            params["max_results"] = DEFAULT_AGENT_WEB_RESULTS
+        display = f"WEB:{query_value}"
+    else:
+        if query_value.upper() == "ALL":
+            params["query"] = ""
+            query_value = ""
+        if not params.get("max_results"):
+            params["max_results"] = DEFAULT_AGENT_SEARCH_RESULTS
+        display = query_value or "ALL"
+        if not params.get("query") and params.get("category"):
+            display = f"RECENT:{params['category']}"
+        if params.get("source"):
+            display = f"{display} @ {params['source']}"
 
     request_key = json.dumps(
         {
+            "backend": backend,
             "query": params.get("query", ""),
+            "url": params.get("url"),
             "category": params.get("category"),
             "source": params.get("source"),
             "days": params.get("days"),
             "max_results": params.get("max_results"),
+            "max_chars": params.get("max_chars"),
+            "include_domains": params.get("include_domains"),
+            "exclude_domains": params.get("exclude_domains"),
+            "search_depth": params.get("search_depth"),
         },
         ensure_ascii=False,
         sort_keys=True,
@@ -134,7 +164,7 @@ class BaseMeetingAgent:
 class ExpertAgent(BaseMeetingAgent):
     """An expert agent participating in the roundtable."""
 
-    # Async search callback: async (query: str) -> dict with 'summary', 'result_count'
+    # Async research callback: async (**params) -> dict with 'summary', 'result_count'
     search_fn: Optional[Callable[..., Coroutine]] = None
 
     def __init__(
@@ -183,9 +213,24 @@ class ExpertAgent(BaseMeetingAgent):
                 if not search_query:
                     break
 
-                params, query_display, request_key = _build_search_request(search_query)
+                try:
+                    params, query_display, request_key = _build_search_request(search_query)
+                except Exception as e:
+                    remaining_searches = MAX_AGENT_SEARCHES - executed_searches
+                    search_history.append(
+                        SEARCH_ERROR_PROMPT.format(
+                            query=str(search_query),
+                            error=e,
+                            remaining_searches=remaining_searches,
+                        )
+                    )
+                    raw = await self._call_llm(prompt + "".join(search_history))
+                    content = safe_parse_agent_output(raw, expected_keys + ["search_query"])
+                    continue
+
                 remaining_searches = MAX_AGENT_SEARCHES - executed_searches - 1
-                is_browse_request = not str(params.get("query", "") or "").strip()
+                backend = str(params.get("backend", "local"))
+                is_browse_request = backend == "local" and not str(params.get("query", "") or "").strip()
 
                 if is_browse_request and keyword_searches == 0:
                     search_history.append(

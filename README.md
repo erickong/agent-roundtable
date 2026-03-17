@@ -56,8 +56,9 @@ A multi-agent roundtable discussion system where multiple AI experts debate a gi
    Required configuration:
    - `MODERATOR_LLM_*` — at least one moderator LLM (API key, base URL, model)
    - `LLM_PROVIDER_1_*` — at least one expert LLM provider
-   - `TAVILY_API_KEY` — (optional) for web search feature
-   - `SEARCH_API_URL` — (optional) use a local Tavily-compatible search service instead of Tavily
+   - `SEARCH_API_URL` — (optional) local Tavily-compatible news service for recent structured news
+   - `TAVILY_API_KEY` — (optional) open-web search for Eastmoney/Xueqiu/Sina/announcements/research
+   - `WEB_SEARCH_API_URL` — (optional) custom Tavily-compatible open-web search backend
 
    If `.env` is missing on first run, the CLI/server will exit with a clear error message.
    Standard local workflow is: copy `.env.example` to `.env`, fill in keys, then restart.
@@ -100,8 +101,9 @@ A multi-agent roundtable discussion system where multiple AI experts debate a gi
 | `LLM_PROVIDER_N_MODEL` | Expert provider N model |
 | `LLM_PROVIDER_N_WEIGHT` | Selection weight (higher = more likely, default: 1) |
 | `LLM_PROVIDER_N_TIMEOUT` | Request timeout in seconds (default: 300) |
-| `SEARCH_API_URL` | Tavily-compatible search API URL (e.g. local news service) |
-| `TAVILY_API_KEY` | Tavily search API key (free at <https://tavily.com>) |
+| `SEARCH_API_URL` | Tavily-compatible local news API URL |
+| `TAVILY_API_KEY` | Tavily API key for open-web search |
+| `WEB_SEARCH_API_URL` | Optional Tavily-compatible open-web search API URL |
 
 ### Project Structure
 
