@@ -24,7 +24,7 @@ async def execute(
     category: Optional[str] = None,
     source: Optional[str] = None,
     days: int = 3,
-    max_results: int = 5,
+    max_results: int = 20,
 ) -> dict:
     """Run a web search and return results.
 

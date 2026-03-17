@@ -148,7 +148,7 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
 
 
 MAX_SEARCH_ROUNDS = 20
-RESEARCH_MAX_RESULTS = 10
+RESEARCH_MAX_RESULTS = 20
 
 
 async def _research_phase(

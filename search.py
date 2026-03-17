@@ -122,7 +122,7 @@ def _format_search_response(results: list[dict[str, Any]], answer: str = "") -> 
 
 
 async def browse_recent_news(
-    max_results: int = 10,
+    max_results: int = 20,
     category: Optional[str] = None,
     source: Optional[str] = None,
     days: int = 3,

@@ -73,7 +73,7 @@ async def _research_phase_cli(topic: str, background: str | None, env_path: str 
     model = config.moderator_llm.model
 
     max_searches = 20
-    research_max_results = 10
+    research_max_results = 20
     collected_info: list[str] = []
     searched_queries: list[str] = []
     seen_commands: set[str] = set()
