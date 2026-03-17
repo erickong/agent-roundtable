@@ -68,9 +68,11 @@ SKILL_PROMPT = """
 - query 只能是1个词（只支持单个关键词查询）
 - 好的例子：「A股」「港股」「芯片」「关税」「新能源」「黄金」「半导体」
 - 坏的例子（不要这样写）：「AI芯片市场」「原油价格走势」「全球半导体投资」
+- 默认先做关键词搜索，不要一上来就用 ALL 或空 query 浏览
 - 如果搜索不到结果，优先改用浏览模式："search_query": {"query": "", "category": "china_finance"}
 - 如果要浏览全部最新新闻，也可以用 "ALL" 作为 query
-- 中国股市/投资议题优先使用 category="china_finance" 浏览最新新闻，而不是反复搜索 A股/港股 这类可能为空的关键词
+- 只有在至少尝试过 1 次关键词搜索之后，或你明确需要市场全景时，才使用浏览模式
+- 中国股市/投资议题在关键词没有结果时，优先使用 category="china_finance" 浏览最新新闻，而不是反复搜索 A股/港股 这类可能为空的关键词
 - 如果浏览过某个 category 仍没有新增信息，不要重复同一个 browse 参数，改换其他 category / source 或直接结束
 - 每次搜索默认返回 20 条新闻，通常不需要手动把 max_results 改小
 - 每次收到搜索结果后，如果信息还不够，你可以继续返回新的 search_query；如果信息足够，就直接输出最终回答，不要再带 search_query
@@ -96,6 +98,14 @@ SEARCH_DUPLICATE_PROMPT = """
 --- 搜索提醒 ---
 你刚才重复请求了「{query}」，系统不会再次执行相同搜索。
 如果还需要补充信息，请换一个新的 query/category/source；否则直接输出最终回答。
+剩余搜索次数：{remaining_searches}
+"""
+
+
+SEARCH_KEYWORD_FIRST_PROMPT = """
+--- 搜索提醒 ---
+本轮请先做至少一次关键词搜索，不要一开始就使用 ALL 或空 query 浏览。
+请先给出一个单词关键词；如果关键词没有结果，再改用浏览模式。
 剩余搜索次数：{remaining_searches}
 """
 

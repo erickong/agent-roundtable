@@ -216,24 +216,6 @@ async def tavily_search(
     results = data.get("results", [])
     answer = data.get("answer", "")
 
-    if _is_local_news_api(url) and topic == "news" and not results:
-        fallback_category = category or _infer_local_news_category(normalized_query)
-        fallback_data = await browse_recent_news(
-            max_results=max_results,
-            category=fallback_category,
-            source=source,
-            days=days,
-        )
-        category_label = fallback_category or "all"
-        fallback_note = (
-            f"## 关键词未命中，已切换到最新新闻浏览\n"
-            f"原关键词: {normalized_query}\n"
-            f"浏览分类: {category_label}\n\n"
-        )
-        fallback_data["summary"] = fallback_note + fallback_data["summary"]
-        fallback_data["answer"] = answer
-        return fallback_data
-
     return _format_search_response(results, answer)
 
 

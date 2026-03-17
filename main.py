@@ -80,6 +80,7 @@ async def _research_phase_cli(topic: str, background: str | None, env_path: str 
     seen_urls: set[str] = set()
     no_progress_rounds = 0
     last_feedback: str | None = None
+    keyword_searches = 0
 
     print("🔍 Moderator is researching background information...")
 
@@ -103,14 +104,14 @@ async def _research_phase_cli(topic: str, background: str | None, env_path: str 
             f"{_t('如果还需搜索，你只能回复以下三种格式之一：1）一个搜索关键词（只能1个词）；2）ALL；3）RECENT:category。不要回复句子。', 'If more search is needed, reply in exactly one of these forms: 1) one single-word keyword; 2) ALL; 3) RECENT:category. Do not reply with sentences.')}\n"
             f"{_t('可用 category 例如：china_finance、finance、international、tech、defense、asia、europe、research、middle_east。', 'Available categories include: china_finance, finance, international, tech, defense, asia, europe, research, middle_east.')}\n"
             f"{_t('重要：不要重复任何已经执行过的指令。ALL 或 RECENT:china_finance 这类浏览指令如果已经执行过，就必须换别的 category 或直接回复 DONE。', 'Important: do not repeat any command that has already been executed. If ALL or RECENT:china_finance has already been used, switch to another category or reply DONE.')}\n"
-            f"{_t('对于中国股市/投资议题，优先使用 RECENT:china_finance 浏览最新财经新闻，而不是反复搜索 A股、港股。', 'For China market topics, prefer RECENT:china_finance to browse recent finance news instead of repeating A-share or HK-stock keywords.')}"
+            f"{_t('默认先做 1-2 次关键词搜索，不要一开始就用 ALL 或 RECENT。只有在关键词没有结果，或者你需要市场全景时，才切换到 RECENT:category。', 'Start with 1-2 keyword searches by default. Do not use ALL or RECENT first. Switch to RECENT:category only if keyword search has no results or you need a broad market overview.')}"
         )
 
         try:
             resp = await client.chat.completions.create(
                 model=model,
                 messages=[
-                    {"role": "system", "content": t(topic, "你是本地新闻数据库(Local News API)搜索助手。你有三种模式：1）关键词搜索：回复1个词；2）浏览全部最新新闻：回复 ALL；3）按分类浏览最新新闻：回复 RECENT:category，例如 RECENT:china_finance、RECENT:tech。系统会把 ALL / RECENT:* 转成 /recent 接口。规则：不能重复已经执行过的指令；如果某次搜索没有新增信息，应该改用不同 category 或直接回复 DONE。", "You are a Local News API search assistant. You have three modes: 1) keyword search with one word; 2) browse all recent news with ALL; 3) browse recent news by category with RECENT:category, e.g. RECENT:china_finance or RECENT:tech. The system maps ALL / RECENT:* to /recent. Do not repeat commands that have already been executed; if a search yields no new information, switch category or reply DONE.")},
+                    {"role": "system", "content": t(topic, "你是本地新闻数据库(Local News API)搜索助手。你有三种模式：1）关键词搜索：回复1个词；2）浏览全部最新新闻：回复 ALL；3）按分类浏览最新新闻：回复 RECENT:category，例如 RECENT:china_finance、RECENT:tech。系统会把 ALL / RECENT:* 转成 /recent 接口。策略：默认先做关键词搜索，不要一开始就用 ALL 或 RECENT。只有在至少一次关键词搜索后，且关键词没有命中，或者你明确需要全景浏览时，才使用 RECENT。", "You are a Local News API search assistant. You have three modes: 1) one-word keyword search; 2) browse all recent news with ALL; 3) browse recent news by category with RECENT:category, e.g. RECENT:china_finance or RECENT:tech. The system maps ALL / RECENT:* to /recent. Strategy: start with keyword search by default, not ALL or RECENT. Use RECENT only after at least one keyword search has been attempted and did not hit, or when a broad overview is clearly needed.")},
                     {"role": "user", "content": prompt},
                 ],
                 temperature=0.3,
@@ -125,6 +126,10 @@ async def _research_phase_cli(topic: str, background: str | None, env_path: str 
             break
 
         actual_query, actual_category, command_key = parse_local_news_command(query)
+        if not actual_query and keyword_searches == 0:
+            last_feedback = "Please try one keyword search first; do not start with ALL or RECENT."
+            print(f"🔍 {last_feedback}")
+            continue
         if command_key in seen_commands:
             print(f"🔍 Moderator repeated the same command: {query}. Stopping to avoid fetching the same news repeatedly.")
             break
@@ -140,8 +145,19 @@ async def _research_phase_cli(topic: str, background: str | None, env_path: str 
                 max_results=research_max_results,
                 topic="news",
             )
+            if actual_query:
+                keyword_searches += 1
             result_urls = {r.get("url", "") for r in result.get("results", []) if r.get("url")}
             new_urls = result_urls - seen_urls
+
+            if actual_query and result.get("result_count", 0) == 0:
+                last_feedback = (
+                    f"Keyword {query} returned no results. Try another short keyword first; "
+                    "if it still fails, then switch to RECENT:category."
+                )
+                print(f"  → Found 0 results")
+                print(f"  → {last_feedback}")
+                continue
 
             if new_urls:
                 seen_urls.update(new_urls)

@@ -67,26 +67,12 @@ async def test_tavily_search_uses_recent_endpoint_for_empty_query(monkeypatch):
 
 
 @pytest.mark.anyio
-async def test_tavily_search_falls_back_to_recent_when_local_search_has_no_results(monkeypatch):
+async def test_tavily_search_returns_zero_results_when_local_search_has_no_hits(monkeypatch):
     monkeypatch.setattr(search, "get_search_api_url", lambda: "http://192.168.3.89:4001/v1/search")
 
     def build_client(*args, **kwargs):
         return FakeAsyncClient(
-            get_response=lambda url, params: FakeResponse(
-                {
-                    "total": 1,
-                    "results": [
-                        {
-                            "title": "China finance fallback",
-                            "link": "https://example.com/fallback",
-                            "summary": "Fallback story",
-                            "published": "2026-03-17T00:00:00Z",
-                            "source": "Test Source",
-                            "category": "china_finance",
-                        }
-                    ],
-                }
-            ),
+            get_response=lambda url, params: (_ for _ in ()).throw(AssertionError("GET should not be used for keyword misses")),
             post_response=lambda url, json: FakeResponse(
                 {
                     "query": "A股",
@@ -101,9 +87,8 @@ async def test_tavily_search_falls_back_to_recent_when_local_search_has_no_resul
 
     result = await search.tavily_search(query="A股", max_results=5, topic="news")
 
-    assert result["result_count"] == 1
-    assert "关键词未命中" in result["summary"]
-    assert "China finance fallback" in result["summary"]
+    assert result["result_count"] == 0
+    assert "搜索结果 (共 0 条)" in result["summary"]
 
 
 def test_parse_local_news_command_supports_recent_modes():

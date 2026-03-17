@@ -15,6 +15,7 @@ from skills.web_search import (
     SEARCH_DUPLICATE_PROMPT,
     SEARCH_ERROR_PROMPT,
     SEARCH_FINAL_ONLY_PROMPT,
+    SEARCH_KEYWORD_FIRST_PROMPT,
     SEARCH_REFINE_PROMPT,
     SKILL_PROMPT as SEARCH_SKILL_PROMPT,
 )
@@ -171,15 +172,30 @@ class ExpertAgent(BaseMeetingAgent):
         search_info: list[dict[str, Any]] = []
         search_history: list[str] = []
         seen_requests: set[str] = set()
+        executed_searches = 0
+        keyword_searches = 0
+        decision_rounds = 0
 
         if self.search_fn:
-            for search_index in range(MAX_AGENT_SEARCHES):
+            while executed_searches < MAX_AGENT_SEARCHES and decision_rounds < MAX_AGENT_SEARCHES * 3:
+                decision_rounds += 1
                 search_query = content.pop("search_query", None) if isinstance(content, dict) else None
                 if not search_query:
                     break
 
                 params, query_display, request_key = _build_search_request(search_query)
-                remaining_searches = MAX_AGENT_SEARCHES - search_index - 1
+                remaining_searches = MAX_AGENT_SEARCHES - executed_searches - 1
+                is_browse_request = not str(params.get("query", "") or "").strip()
+
+                if is_browse_request and keyword_searches == 0:
+                    search_history.append(
+                        SEARCH_KEYWORD_FIRST_PROMPT.format(
+                            remaining_searches=MAX_AGENT_SEARCHES - executed_searches,
+                        )
+                    )
+                    raw = await self._call_llm(prompt + "".join(search_history))
+                    content = safe_parse_agent_output(raw, expected_keys + ["search_query"])
+                    continue
 
                 if request_key in seen_requests:
                     logger.info("[%s] Round %d duplicate search skipped: '%s'", self.name, round_index, query_display)
@@ -199,6 +215,9 @@ class ExpertAgent(BaseMeetingAgent):
                     continue
 
                 seen_requests.add(request_key)
+                executed_searches += 1
+                if not is_browse_request:
+                    keyword_searches += 1
 
                 try:
                     search_result = await self.search_fn(**params)
@@ -206,7 +225,7 @@ class ExpertAgent(BaseMeetingAgent):
                         {
                             "query": query_display,
                             "result_count": search_result.get("result_count", 0),
-                            "search_index": search_index + 1,
+                            "search_index": executed_searches,
                             "max_searches": MAX_AGENT_SEARCHES,
                         }
                     )
@@ -214,7 +233,7 @@ class ExpertAgent(BaseMeetingAgent):
                         "[%s] Round %d search %d/%d: '%s' → %d results",
                         self.name,
                         round_index,
-                        search_index + 1,
+                        executed_searches,
                         MAX_AGENT_SEARCHES,
                         query_display,
                         search_info[-1]["result_count"],
@@ -223,7 +242,7 @@ class ExpertAgent(BaseMeetingAgent):
                         SEARCH_REFINE_PROMPT.format(
                             query=query_display,
                             summary=search_result.get("summary", ""),
-                            search_index=search_index + 1,
+                            search_index=executed_searches,
                             max_searches=MAX_AGENT_SEARCHES,
                             remaining_searches=remaining_searches,
                         )
