@@ -132,16 +132,23 @@ class ExpertAgent(BaseMeetingAgent):
 
         if search_query and self.search_fn:
             try:
-                search_result = await self.search_fn(search_query)
+                if isinstance(search_query, dict):
+                    search_result = await self.search_fn(**search_query)
+                    query_display = search_query.get("query", "")
+                    if not query_display: query_display = "ALL"
+                else:
+                    search_result = await self.search_fn(search_query)
+                    query_display = str(search_query)
+
                 search_info = {
                     "query": search_query,
                     "result_count": search_result.get("result_count", 0),
                 }
                 logger.info("[%s] Round %d search: '%s' → %d results",
-                            self.name, round_index, search_query, search_info["result_count"])
+                            self.name, round_index, query_display, search_info["result_count"])
                 # Second pass: re-call LLM with search results
                 refine_suffix = SEARCH_REFINE_PROMPT.format(
-                    query=search_query, summary=search_result.get("summary", ""),
+                    query=query_display, summary=search_result.get("summary", ""),
                 )
                 raw = await self._call_llm(prompt + refine_suffix)
                 content = safe_parse_agent_output(raw, expected_keys)

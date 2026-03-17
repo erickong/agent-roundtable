@@ -37,6 +37,8 @@ async def tavily_search(
     topic: str = "general",
     days: int = 3,
     api_key: Optional[str] = None,
+    category: Optional[str] = None,
+    source: Optional[str] = None,
 ) -> dict:
     """Search using Tavily-compatible API.
 
@@ -47,6 +49,8 @@ async def tavily_search(
         topic: "general" or "news" (default "general").
         days: Search within the last N days (default 3).
         api_key: Tavily API key. Falls back to TAVILY_API_KEY env var.
+        category: News category filter (e.g. china_finance, tech).
+        source: News source filter.
 
     Returns:
         Dict with 'results' list and formatted 'summary' string.
@@ -63,6 +67,11 @@ async def tavily_search(
         "days": days,
         "include_answer": True,
     }
+    
+    if category:
+        payload["category"] = category
+    if source:
+        payload["source"] = source
 
     # Include api_key only for Tavily (or when explicitly provided)
     key = api_key or get_tavily_api_key()

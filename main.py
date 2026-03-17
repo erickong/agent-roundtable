@@ -101,7 +101,7 @@ async def _research_phase_cli(topic: str, background: str | None, env_path: str 
             resp = await client.chat.completions.create(
                 model=model,
                 messages=[
-                    {"role": "system", "content": t(topic, "你是新闻数据库搜索助手。你的任务是将议题拆解为多个搜索词，逐次搜索新闻数据库。规则：每次只能回复1个词作为搜索词，或回复DONE表示搜索结束。搜索不限次数，请尽量覆盖所有相关关键词。提示：如果某个关键词搜索不到结果，可以回复 ALL 来获取最新全部新闻。", "You are a news database search assistant. Break topics into individual keywords for sequential database searches. Rule: reply with exactly ONE word as search keyword, or DONE to finish. No limit on searches — cover all relevant keywords. Tip: if a keyword returns no results, reply ALL to fetch all latest news.")},
+                    {"role": "system", "content": t(topic, "你是本地新闻数据库(Local News API)搜索助手。你的任务是将议题拆解为多个搜索词，逐次搜索新闻数据库。可用分类(category)包括: china_finance, finance, international, tech, defense 等。规则：每次只能回复1个词作为搜索词，或回复DONE表示搜索结束。搜索不限次数，请尽量覆盖所有相关关键词。提示：如果需要获取最新无过滤新闻，请回复 ALL。", "You are a Local News API search assistant. Break topics into individual keywords for sequential database searches. Available categories: china_finance, finance, tech, etc. Rule: reply with exactly ONE word as search keyword, or DONE to finish. No limit on searches. Tip: empty/ALL returns latest news.")},
                     {"role": "user", "content": prompt},
                 ],
                 temperature=0.3,
