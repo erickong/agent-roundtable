@@ -1,5 +1,7 @@
 """Prompt templates for the Roundtable Meeting System V1."""
 
+from i18n import LANG_FOLLOW_INSTRUCTION
+
 MODERATOR_OPENING_PROMPT = """\
 你是这场圆桌会议的仲裁者和主持人。
 请根据用户议题完成开场：
@@ -24,7 +26,7 @@ MODERATOR_OPENING_PROMPT = """\
 {goal_section}
 {constraints_section}
 {background_section}
-"""
+""" + LANG_FOLLOW_INSTRUCTION
 
 EXPERT_ROUND1_PROMPT = """\
 你是圆桌会议中的一位专家，角色风格为：{role_label}。
@@ -51,7 +53,7 @@ EXPERT_ROUND1_PROMPT = """\
 议题：{topic}
 Moderator 开场：
 {opening}
-"""
+""" + LANG_FOLLOW_INSTRUCTION
 
 EXPERT_ROUND2_PROMPT = """\
 你是圆桌会议中的一位专家，角色风格为：{role_label}。
@@ -92,7 +94,7 @@ EXPERT_ROUND2_PROMPT = """\
 
 Moderator 总结：
 {moderator_summary}
-"""
+""" + LANG_FOLLOW_INSTRUCTION
 
 EXPERT_ROUND3_PROMPT = """\
 你是圆桌会议中的一位专家，角色风格为：{role_label}。
@@ -127,7 +129,7 @@ Moderator 总结：
 
 针对你（{agent_name}）的攻击：
 {attacks_on_me}
-"""
+""" + LANG_FOLLOW_INSTRUCTION
 
 EXPERT_ROUND4_PROMPT = """\
 你是圆桌会议中的一位专家，角色风格为：{role_label}。
@@ -149,7 +151,7 @@ EXPERT_ROUND4_PROMPT = """\
 
 前三轮高度压缩总结：
 {compressed_summary}
-"""
+""" + LANG_FOLLOW_INSTRUCTION
 
 MODERATOR_SUMMARY_PROMPT = """\
 你是圆桌会议仲裁者。
@@ -185,7 +187,7 @@ MODERATOR_SUMMARY_PROMPT = """\
 本轮各专家发言：
 {round_messages}
 {previous_context}
-"""
+""" + LANG_FOLLOW_INSTRUCTION
 
 MODERATOR_FINAL_PROMPT = """\
 你是这场圆桌会议的仲裁者。
@@ -222,4 +224,4 @@ MODERATOR_FINAL_PROMPT = """\
 
 全部讨论记录：
 {all_discussion}
-"""
+""" + LANG_FOLLOW_INSTRUCTION

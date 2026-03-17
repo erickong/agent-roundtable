@@ -13,6 +13,7 @@ from config import MeetingConfig, load_config
 from models import MeetingInput
 from agents import ModeratorAgent, ExpertAgent
 from meeting_streaming import StreamingMeeting
+from i18n import t, get_default_experts, is_chinese, LANG_FOLLOW_INSTRUCTION
 from search import get_tavily_api_key, tavily_search
 
 from openai import AsyncOpenAI
@@ -24,12 +25,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Default expert configs
-DEFAULT_EXPERTS = [
-    {"name": "创新专家", "role_label": "创新型（偏提出新想法）"},
-    {"name": "审慎专家", "role_label": "审慎型（偏发现漏洞）"},
-    {"name": "工程专家", "role_label": "工程型（偏落地实现）"},
-    {"name": "领域专家", "role_label": "专业型（偏领域知识）"},
-]
+DEFAULT_EXPERTS = get_default_experts  # function; called with topic at runtime
 
 # Active meetings: session_id -> StreamingMeeting
 _active_meetings: dict[str, StreamingMeeting] = {}
@@ -104,7 +100,7 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
             if action == "start_meeting":
                 topic = data.get("topic", "").strip()
                 if not topic:
-                    await send_event({"type": "error", "content": "请输入讨论议题。"})
+                    await send_event({"type": "error", "content": "Please enter a discussion topic. / 请输入讨论议题。"})
                     continue
 
                 goal = data.get("goal", "").strip() or None
@@ -125,17 +121,17 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
             elif action == "stop_meeting":
                 if session_id in _active_meetings:
                     _active_meetings[session_id].cancel()
-                    await send_event({"type": "system", "content": "会议已被用户终止。"})
-                    await send_event({"type": "meeting_end", "content": "会议已终止。"})
+                    await send_event({"type": "system", "content": t(topic, "会议已被用户终止。", "Meeting stopped by user.")})
+                    await send_event({"type": "meeting_end", "content": t(topic, "会议已终止。", "Meeting terminated.")})
 
             elif action == "chat":
                 user_msg = data.get("message", "").strip()
                 if not user_msg:
-                    await send_event({"type": "error", "content": "请输入消息。"})
+                    await send_event({"type": "error", "content": "Please enter a message. / 请输入消息。"})
                     continue
                 history = _meeting_histories.get(session_id, "")
                 if not history:
-                    await send_event({"type": "error", "content": "没有可用的会议记录。"})
+                    await send_event({"type": "error", "content": "No meeting history available. / 没有可用的会议记录。"})
                     continue
                 asyncio.create_task(
                     _chat_with_moderator(session_id, user_msg, history, send_event)
@@ -168,33 +164,34 @@ async def _research_phase(
     collected_info: list[str] = []
     searched_queries: list[str] = []
 
-    await send_event({"type": "system", "content": "🔍 仲裁者正在搜索背景信息..."})
+    await send_event({"type": "system", "content": t(topic, "🔍 仲裁者正在搜索背景信息...", "🔍 Moderator is searching for background information...")})
 
     for i in range(MAX_SEARCH_ROUNDS):
         # Ask moderator to generate a search query
+        _t = lambda zh, en: t(topic, zh, en)
         prompt = (
-            f"你是圆桌会议的仲裁者。你需要为即将讨论的议题搜索背景信息。\n\n"
-            f"议题：{topic}\n"
+            f"{_t('你是圆桌会议的仲裁者。你需要为即将讨论的议题搜索背景信息。', 'You are the moderator of a roundtable meeting. You need to search for background information on the upcoming topic.')}\n\n"
+            f"{_t('议题', 'Topic')}：{topic}\n"
         )
         if existing_background:
-            prompt += f"用户提供的背景：{existing_background}\n"
+            prompt += f"{_t('用户提供的背景', 'User-provided background')}：{existing_background}\n"
         if collected_info:
-            prompt += f"\n已搜集到的信息：\n{''.join(collected_info[-3:])}\n"
+            prompt += f"\n{_t('已搜集到的信息', 'Collected information so far')}：\n{''.join(collected_info[-3:])}\n"
         if searched_queries:
-            prompt += f"\n已搜索过的关键词：{', '.join(searched_queries)}\n"
+            prompt += f"\n{_t('已搜索过的关键词', 'Previously searched keywords')}：{', '.join(searched_queries)}\n"
 
         prompt += (
-            f"\n这是第 {i + 1}/{MAX_SEARCH_ROUNDS} 次搜索机会。"
-            f"请判断是否还需要搜索更多信息。\n"
-            f"如果信息已经足够充分，回复：DONE\n"
-            f"如果还需搜索，回复一个简短的搜索关键词（不要回复其他内容，只回复关键词）。"
+            f"\n{_t(f'这是第 {i + 1}/{MAX_SEARCH_ROUNDS} 次搜索机会。', f'This is search opportunity {i + 1}/{MAX_SEARCH_ROUNDS}.')}"
+            f"{_t('请判断是否还需要搜索更多信息。', 'Please decide whether more searching is needed.')}\n"
+            f"{_t('如果信息已经足够充分，回复：DONE', 'If information is sufficient, reply: DONE')}\n"
+            f"{_t('如果还需搜索，回复一个简短的搜索关键词（不要回复其他内容，只回复关键词）。', 'If more search is needed, reply with a short search keyword only (no other text).')}"
         )
 
         try:
             resp = await moderator_client.chat.completions.create(
                 model=model,
                 messages=[
-                    {"role": "system", "content": "你是圆桌会议的研究助手。根据议题判断是否需要搜索，并生成精准的搜索关键词。"},
+                    {"role": "system", "content": t(topic, "你是圆桌会议的研究助手。根据议题判断是否需要搜索，并生成精准的搜索关键词。", "You are a roundtable meeting research assistant. Decide whether to search and generate precise search keywords based on the topic.")},
                     {"role": "user", "content": prompt},
                 ],
                 temperature=0.3,
@@ -205,11 +202,11 @@ async def _research_phase(
             break
 
         if not query or query.upper() == "DONE":
-            await send_event({"type": "system", "content": "🔍 仲裁者判断信息已充分，结束搜索。"})
+            await send_event({"type": "system", "content": t(topic, "🔍 仲裁者判断信息已充分，结束搜索。", "🔍 Moderator determined information is sufficient.")})
             break
 
         searched_queries.append(query)
-        await send_event({"type": "search_start", "content": f"🔍 搜索 ({i + 1}/{MAX_SEARCH_ROUNDS}): {query}"})
+        await send_event({"type": "search_start", "content": f"🔍 {t(topic, '搜索', 'Search')} ({i + 1}/{MAX_SEARCH_ROUNDS}): {query}"})
 
         try:
             result = await tavily_search(query=query, max_results=5, topic="news")
@@ -221,12 +218,12 @@ async def _research_phase(
             })
         except Exception as e:
             logger.warning("Search failed for query '%s': %s", query, e)
-            await send_event({"type": "system", "content": f"搜索失败: {e}"})
+            await send_event({"type": "system", "content": t(topic, f"搜索失败: {e}", f"Search failed: {e}")})
 
     if collected_info:
-        await send_event({"type": "system", "content": f"🔍 搜索完成，共进行了 {len(searched_queries)} 次搜索。开始圆桌会议..."})
+        await send_event({"type": "system", "content": t(topic, f"🔍 搜索完成，共进行了 {len(searched_queries)} 次搜索。开始圆桌会议...", f"🔍 Search complete ({len(searched_queries)} searches). Starting roundtable meeting...")})
     else:
-        await send_event({"type": "system", "content": "🔍 未搜集到有效信息，直接开始圆桌会议..."})
+        await send_event({"type": "system", "content": t(topic, "🔍 未搜集到有效信息，直接开始圆桌会议...", "🔍 No useful information found, starting roundtable meeting directly...")})
 
     return "\n\n".join(collected_info)
 
@@ -268,7 +265,7 @@ async def _run_meeting_task(
                 role_label=cfg["role_label"],
                 provider=config.select_expert_provider(),
             )
-            for cfg in DEFAULT_EXPERTS
+            for cfg in DEFAULT_EXPERTS(topic)
         ]
 
         meeting = StreamingMeeting(
@@ -284,16 +281,16 @@ async def _run_meeting_task(
         # Save the full discussion history for post-meeting chat
         if final_report:
             _meeting_histories[session_id] = meeting._build_full_discussion(
-                meeting.opening_text or ""
+                meeting.opening_text or "", topic
             )
 
     except asyncio.CancelledError:
-        await send_event({"type": "system", "content": "会议已取消。"})
-        await send_event({"type": "meeting_end", "content": "会议已终止。"})
+        await send_event({"type": "system", "content": t(topic, "会议已取消。", "Meeting cancelled.")})
+        await send_event({"type": "meeting_end", "content": t(topic, "会议已终止。", "Meeting terminated.")})
     except Exception as e:
         logger.exception("Meeting failed for session %s", session_id)
-        await send_event({"type": "error", "content": f"会议出错: {e}"})
-        await send_event({"type": "meeting_end", "content": "会议异常结束。"})
+        await send_event({"type": "error", "content": t(topic, f"会议出错: {e}", f"Meeting error: {e}")})
+        await send_event({"type": "meeting_end", "content": t(topic, "会议异常结束。", "Meeting ended abnormally.")})
     finally:
         _active_meetings.pop(session_id, None)
 
@@ -317,10 +314,16 @@ async def _chat_with_moderator(
         )
 
         system_prompt = (
-            "你是刚刚结束的圆桌会议的仲裁者。以下是完整的会议讨论记录。\n"
-            "用户现在对会议内容有后续问题，请基于会议记录回答。\n"
-            "保持中立、准确、简洁。如果用户问到会议中没有讨论的内容，请如实说明。\n\n"
-            f"=== 会议记录 ===\n{meeting_history}\n=== 会议记录结束 ==="
+            t(user_message,
+              "你是刚刚结束的圆桌会议的仲裁者。以下是完整的会议讨论记录。\n"
+              "用户现在对会议内容有后续问题，请基于会议记录回答。\n"
+              "保持中立、准确、简洁。如果用户问到会议中没有讨论的内容，请如实说明。\n\n",
+              "You are the moderator of a roundtable meeting that just ended. Below is the full meeting transcript.\n"
+              "The user has follow-up questions about the meeting. Answer based on the transcript.\n"
+              "Stay neutral, accurate, and concise. If the user asks about something not discussed, say so.\n\n"
+            )
+            + f"=== Meeting Record ===\n{meeting_history}\n=== End of Record ==="
+            + LANG_FOLLOW_INSTRUCTION
         )
 
         # Initialize or retrieve session chat history
@@ -331,7 +334,7 @@ async def _chat_with_moderator(
 
         messages = [{"role": "system", "content": system_prompt}] + _chat_histories[session_id]
 
-        await send_event({"type": "agent_start", "agent": "Moderator", "role": "仲裁者", "round": "chat"})
+        await send_event({"type": "agent_start", "agent": "Moderator", "role": t(user_message, "仲裁者", "Arbiter"), "round": "chat"})
 
         resp = await client.chat.completions.create(
             model=config.moderator_llm.model,
@@ -345,14 +348,14 @@ async def _chat_with_moderator(
         await send_event({
             "type": "agent_message",
             "agent": "Moderator",
-            "role": "仲裁者",
+            "role": t(user_message, "仲裁者", "Arbiter"),
             "round": "chat",
             "content": reply,
         })
 
     except Exception as e:
         logger.exception("Chat with moderator failed for session %s", session_id)
-        await send_event({"type": "error", "content": f"对话出错: {e}"})
+        await send_event({"type": "error", "content": t(user_message, f"对话出错: {e}", f"Chat error: {e}")})
 
 
 if __name__ == "__main__":

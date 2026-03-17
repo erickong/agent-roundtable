@@ -8,6 +8,7 @@ from config import load_config
 from models import MeetingInput
 from agents import ModeratorAgent, ExpertAgent
 from meeting import RoundtableMeeting
+from i18n import t, get_default_experts, LANG_FOLLOW_INSTRUCTION
 
 logging.basicConfig(
     level=logging.INFO,
@@ -15,13 +16,8 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Default expert configurations
-DEFAULT_EXPERTS = [
-    {"name": "创新专家", "role_label": "创新型（偏提出新想法）"},
-    {"name": "审慎专家", "role_label": "审慎型（偏发现漏洞）"},
-    {"name": "工程专家", "role_label": "工程型（偏落地实现）"},
-    {"name": "领域专家", "role_label": "专业型（偏领域知识）"},
-]
+# Default expert configurations — selected at runtime based on topic language
+DEFAULT_EXPERTS = get_default_experts  # function; called with topic
 
 
 def _render_final_report_markdown(report) -> str:
@@ -82,28 +78,29 @@ async def _research_phase_cli(topic: str, background: str | None, env_path: str 
     print("🔍 Moderator is researching background information...")
 
     for i in range(max_searches):
+        _t = lambda zh, en: t(topic, zh, en)
         prompt = (
-            f"你是圆桌会议的仲裁者。你需要为即将讨论的议题搜索背景信息。\n\n"
-            f"议题：{topic}\n"
+            f"{_t('你是圆桌会议的仲裁者。你需要为即将讨论的议题搜索背景信息。', 'You are the moderator of a roundtable meeting. You need to search for background information on the upcoming topic.')}\n\n"
+            f"{_t('议题', 'Topic')}：{topic}\n"
         )
         if background:
-            prompt += f"用户提供的背景：{background}\n"
+            prompt += f"{_t('用户提供的背景', 'User-provided background')}：{background}\n"
         if collected_info:
-            prompt += f"\n已搜集到的信息：\n{''.join(collected_info[-3:])}\n"
+            prompt += f"\n{_t('已搜集到的信息', 'Collected information so far')}：\n{''.join(collected_info[-3:])}\n"
         if searched_queries:
-            prompt += f"\n已搜索过的关键词：{', '.join(searched_queries)}\n"
+            prompt += f"\n{_t('已搜索过的关键词', 'Previously searched keywords')}：{', '.join(searched_queries)}\n"
         prompt += (
-            f"\n这是第 {i + 1}/{max_searches} 次搜索机会。"
-            f"请判断是否还需要搜索更多信息。\n"
-            f"如果信息已经足够充分，回复：DONE\n"
-            f"如果还需搜索，回复一个简短的搜索关键词（不要回复其他内容，只回复关键词）。"
+            f"\n{_t(f'这是第 {i + 1}/{max_searches} 次搜索机会。', f'This is search opportunity {i + 1}/{max_searches}.')}"
+            f"{_t('请判断是否还需要搜索更多信息。', 'Please decide whether more searching is needed.')}\n"
+            f"{_t('如果信息已经足够充分，回复：DONE', 'If information is sufficient, reply: DONE')}\n"
+            f"{_t('如果还需搜索，回复一个简短的搜索关键词（不要回复其他内容，只回复关键词）。', 'If more search is needed, reply with a short search keyword only (no other text).')}"
         )
 
         try:
             resp = await client.chat.completions.create(
                 model=model,
                 messages=[
-                    {"role": "system", "content": "你是圆桌会议的研究助手。根据议题判断是否需要搜索，并生成精准的搜索关键词。"},
+                    {"role": "system", "content": t(topic, "你是圆桌会议的研究助手。根据议题判断是否需要搜索，并生成精准的搜索关键词。", "You are a roundtable meeting research assistant. Decide whether to search and generate precise search keywords based on the topic.")},
                     {"role": "user", "content": prompt},
                 ],
                 temperature=0.3,
@@ -181,7 +178,7 @@ async def run_meeting(
     moderator = ModeratorAgent(provider=config.moderator_llm)
 
     # Each expert gets a provider selected by weight
-    configs = expert_configs or DEFAULT_EXPERTS
+    configs = expert_configs or DEFAULT_EXPERTS(topic)
     experts = [
         ExpertAgent(
             name=cfg["name"],
@@ -322,10 +319,16 @@ def _interactive_chat(meeting_report: str, env_path: str | None = None):
     client = OpenAI(**kwargs)
 
     system_prompt = (
-        "你是刚刚结束的圆桌会议的仲裁者。以下是完整的会议报告。\n"
-        "用户现在对会议内容有后续问题，请基于会议报告回答。\n"
-        "保持中立、准确、简洁。如果用户问到会议中没有讨论的内容，请如实说明。\n\n"
-        f"=== 会议报告 ===\n{meeting_report}\n=== 会议报告结束 ==="
+        t(meeting_report,
+          "你是刚刚结束的圆桌会议的仲裁者。以下是完整的会议报告。\n"
+          "用户现在对会议内容有后续问题，请基于会议报告回答。\n"
+          "保持中立、准确、简洁。如果用户问到会议中没有讨论的内容，请如实说明。\n\n",
+          "You are the moderator of a roundtable meeting that just ended. Below is the full meeting report.\n"
+          "The user has follow-up questions about the meeting. Answer based on the report.\n"
+          "Stay neutral, accurate, and concise. If the user asks about something not discussed, say so.\n\n"
+        )
+        + f"=== Meeting Report ===\n{meeting_report}\n=== End of Report ==="
+        + LANG_FOLLOW_INSTRUCTION
     )
     chat_history = [{"role": "system", "content": system_prompt}]
 

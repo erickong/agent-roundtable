@@ -9,6 +9,7 @@ from openai import AsyncOpenAI
 from config import LLMProviderConfig
 from models import AgentMessage, RoundScore, RoundSummary, FinalReport, FinalScore
 from parser import parse_json_response, safe_parse_agent_output
+from i18n import LANG_FOLLOW_INSTRUCTION
 from prompts import (
     MODERATOR_OPENING_PROMPT,
     MODERATOR_SUMMARY_PROMPT,
@@ -107,6 +108,7 @@ class ExpertAgent(BaseMeetingAgent):
             f"你的基础思考风格是 [{self.style_label}]。"
             "请始终保持该思考风格参与讨论，提出建设性、有深度的观点，"
             "并在表述身份时以当前对外头衔为准。"
+            + LANG_FOLLOW_INSTRUCTION
         )
 
     def retitle(self, title: str):
@@ -201,6 +203,7 @@ class ModeratorAgent(BaseMeetingAgent):
         system_prompt = (
             "你是圆桌会议的仲裁者和主持人。你的职责是引导话题、每轮做总结、"
             "为每个专家打分，并在最终输出推荐方案。保持中立，不深度参与具体业务分析。"
+            + LANG_FOLLOW_INSTRUCTION
         )
         super().__init__(name, "仲裁者", system_prompt, provider)
 

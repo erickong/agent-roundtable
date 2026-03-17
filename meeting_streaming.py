@@ -7,6 +7,7 @@ from typing import Any, Callable, Coroutine, List
 
 from models import MeetingInput, AgentMessage, RoundSummary, FinalReport
 from agents import ModeratorAgent, ExpertAgent
+from i18n import t
 from meeting import (
     _format_messages,
     _extract_attacks_on_agent,
@@ -55,13 +56,13 @@ class StreamingMeeting:
 
         await self._emit({
             "type": "system",
-            "content": "会议开始，正在准备...",
+            "content": t(topic, "会议开始，正在准备...", "Meeting starting, preparing..."),
         })
 
         # === Round 0: Opening ===
         self._check_cancel()
-        await self._emit({"type": "round_start", "round": 0, "title": "Moderator 开场"})
-        await self._emit({"type": "agent_start", "agent": "Moderator", "role": "仲裁者", "round": 0})
+        await self._emit({"type": "round_start", "round": 0, "title": t(topic, "Moderator 开场", "Moderator Opening")})
+        await self._emit({"type": "agent_start", "agent": "Moderator", "role": t(topic, "仲裁者", "Arbiter"), "round": 0})
 
         expert_specs = _build_expert_specs(self.experts)
         opening_text = await self.moderator.opening(
@@ -76,7 +77,7 @@ class StreamingMeeting:
         await self._emit({
             "type": "agent_message",
             "agent": "Moderator",
-            "role": "仲裁者",
+            "role": t(topic, "仲裁者", "Arbiter"),
             "round": 0,
             "content": opening_text,
         })
@@ -86,7 +87,7 @@ class StreamingMeeting:
 
         # === Round 1 ===
         self._check_cancel()
-        await self._emit({"type": "round_start", "round": 1, "title": "第一轮：独立初始观点"})
+        await self._emit({"type": "round_start", "round": 1, "title": t(topic, "第一轮：独立初始观点", "Round 1: Independent Initial Views")})
 
         round1_messages = await self._run_expert_round(
             round_num=1,
@@ -101,7 +102,7 @@ class StreamingMeeting:
 
         # === Round 2 ===
         self._check_cancel()
-        await self._emit({"type": "round_start", "round": 2, "title": "第二轮：新观点 + 攻击弱点 + 保留亮点"})
+        await self._emit({"type": "round_start", "round": 2, "title": t(topic, "第二轮：新观点 + 攻击弱点 + 保留亮点", "Round 2: New Ideas + Critiques + Preserved Points")})
 
         round2_messages = await self._run_expert_round(
             round_num=2,
@@ -120,7 +121,7 @@ class StreamingMeeting:
 
         # === Round 3 ===
         self._check_cancel()
-        await self._emit({"type": "round_start", "round": 3, "title": "第三轮：辩护 + 修正 + 收敛"})
+        await self._emit({"type": "round_start", "round": 3, "title": t(topic, "第三轮：辩护 + 修正 + 收敛", "Round 3: Defense + Revision + Convergence")})
 
         round3_messages = await self._run_expert_round(
             round_num=3,
@@ -141,7 +142,7 @@ class StreamingMeeting:
         # === Round 4 (optional) ===
         if summary3.should_continue and self.max_rounds >= 4:
             self._check_cancel()
-            await self._emit({"type": "round_start", "round": 4, "title": "第四轮：关键未解问题补充"})
+            await self._emit({"type": "round_start", "round": 4, "title": t(topic, "第四轮：关键未解问题补充", "Round 4: Supplementary on Key Unresolved Issues")})
 
             focused_issues = summary3.next_step
             compressed = _build_compressed_summary(self.summaries)
@@ -163,23 +164,23 @@ class StreamingMeeting:
         else:
             await self._emit({
                 "type": "system",
-                "content": "Moderator 判定讨论已充分收敛，跳过第四轮。",
+                "content": t(topic, "Moderator 判定讨论已充分收敛，跳过第四轮。", "Moderator determined discussion has sufficiently converged, skipping Round 4."),
             })
 
         # === Final Report ===
         self._check_cancel()
-        await self._emit({"type": "round_start", "round": "final", "title": "最终报告"})
-        await self._emit({"type": "agent_start", "agent": "Moderator", "role": "仲裁者", "round": "final"})
+        await self._emit({"type": "round_start", "round": "final", "title": t(topic, "最终报告", "Final Report")})
+        await self._emit({"type": "agent_start", "agent": "Moderator", "role": t(topic, "仲裁者", "Arbiter"), "round": "final"})
 
-        all_discussion = self._build_full_discussion(opening_text)
+        all_discussion = self._build_full_discussion(opening_text, topic)
         final_report = await self.moderator.finalize(topic=topic, all_discussion=all_discussion)
 
         await self._emit({
             "type": "final_report",
             "agent": "Moderator",
-            "role": "仲裁者",
+            "role": t(topic, "仲裁者", "Arbiter"),
             "round": "final",
-            "content": self._format_final_report(final_report),
+            "content": self._format_final_report(final_report, topic),
             "data": {
                 "problem_definition": final_report.problem_definition,
                 "main_consensus": final_report.main_consensus,
@@ -195,7 +196,7 @@ class StreamingMeeting:
             },
         })
 
-        await self._emit({"type": "meeting_end", "content": "会议结束。"})
+        await self._emit({"type": "meeting_end", "content": t(topic, "会议结束。", "Meeting ended.")})
         return final_report
 
     async def _run_expert_round(self, round_num: int, coro_fn) -> List[AgentMessage]:
@@ -217,7 +218,7 @@ class StreamingMeeting:
                     "type": "agent_error",
                     "agent": expert.name,
                     "round": round_num,
-                    "content": f"发言失败: {result}",
+                    "content": t(topic, f"发言失败: {result}", f"Failed to respond: {result}"),
                 })
                 continue
             messages.append(result)
@@ -237,7 +238,7 @@ class StreamingMeeting:
     async def _run_moderator_summary(
         self, round_index: int, topic: str, round_messages: str, previous_context: str = ""
     ) -> RoundSummary:
-        await self._emit({"type": "agent_start", "agent": "Moderator", "role": "仲裁者", "round": round_index})
+        await self._emit({"type": "agent_start", "agent": "Moderator", "role": t(topic, "仲裁者", "Arbiter"), "round": round_index})
 
         summary = await self.moderator.summarize_and_score(
             round_index=round_index,
@@ -247,64 +248,67 @@ class StreamingMeeting:
         )
 
         # Build readable summary text
-        parts = [f"## 第{round_index}轮总结\n"]
+        _t = lambda zh, en: t(topic, zh, en)
+        parts = [f"## {_t(f'第{round_index}轮总结', f'Round {round_index} Summary')}\n"]
         if summary.new_valuable_ideas:
-            parts.append("### 新增关键观点")
+            parts.append(f"### {_t('新增关键观点', 'New Key Ideas')}")
             for idea in summary.new_valuable_ideas:
                 parts.append(f"- {idea}")
         if summary.strong_critiques:
-            parts.append("\n### 有力攻击")
+            parts.append(f"\n### {_t('有力攻击', 'Strong Critiques')}")
             for c in summary.strong_critiques:
                 parts.append(f"- {c}")
         if summary.points_worth_preserving:
-            parts.append("\n### 值得保留的观点")
+            parts.append(f"\n### {_t('值得保留的观点', 'Points Worth Preserving')}")
             for p in summary.points_worth_preserving:
                 parts.append(f"- {p}")
         if summary.scores:
-            parts.append("\n### 评分")
+            parts.append(f"\n### {_t('评分', 'Scores')}")
             for s in summary.scores:
                 parts.append(f"- **{s.agent_name}**: Novelty {s.novelty_score}/5 | Critique {s.critique_score}/5 — {s.comment}")
-        parts.append(f"\n### 下一步\n{summary.next_step}")
+        parts.append(f"\n### {_t('下一步', 'Next Step')}\n{summary.next_step}")
 
         await self._emit({
             "type": "moderator_summary",
             "agent": "Moderator",
-            "role": "仲裁者",
+            "role": t(topic, "仲裁者", "Arbiter"),
             "round": round_index,
             "content": "\n".join(parts),
         })
         return summary
 
-    def _build_full_discussion(self, opening_text: str) -> str:
-        parts = [f"## Moderator 开场\n{opening_text}"]
+    def _build_full_discussion(self, opening_text: str, topic: str = "") -> str:
+        _t = lambda zh, en: t(topic, zh, en) if topic else zh
+        parts = [f"## {_t('Moderator 开场', 'Moderator Opening')}\n{opening_text}"]
         for summary in self.summaries:
             round_idx = summary.round_index
             round_msgs = [m for m in self.messages if m.round_index == round_idx]
-            parts.append(f"\n## 第{round_idx}轮发言")
+            parts.append(f"\n## {_t(f'第{round_idx}轮发言', f'Round {round_idx} Statements')}")
             parts.append(_format_messages(round_msgs))
-            parts.append(f"\n## 第{round_idx}轮 Moderator 总结")
+            parts.append(f"\n## {_t(f'第{round_idx}轮 Moderator 总结', f'Round {round_idx} Moderator Summary')}")
             parts.append(summary.raw_text)
         return "\n\n".join(parts)
 
     @staticmethod
-    def _format_final_report(report: FinalReport) -> str:
-        lines = ["# 圆桌会议最终报告\n"]
-        lines.append(f"## 1. 问题定义\n{report.problem_definition}\n")
-        lines.append("## 2. 主要共识")
+    def _format_final_report(report: FinalReport, topic: str = "") -> str:
+        _t = lambda zh, en: t(topic, zh, en) if topic else zh
+        lines = [f"# {_t('圆桌会议最终报告', 'Final Roundtable Report')}\n"]
+        lines.append(f"## 1. {_t('问题定义', 'Problem Definition')}\n{report.problem_definition}\n")
+        lines.append(f"## 2. {_t('主要共识', 'Main Consensus')}")
         for c in report.main_consensus:
             lines.append(f"- {c}")
-        lines.append("\n## 3. 主要分歧")
+        lines.append(f"\n## 3. {_t('主要分歧', 'Main Disagreements')}")
         for d in report.main_disagreements:
             lines.append(f"- {d}")
-        lines.append(f"\n## 4. 推荐方案\n{report.recommended_solution}\n")
-        lines.append(f"## 5. 推荐理由\n{report.why_this_solution}\n")
-        lines.append("## 6. 保留意见")
+        lines.append(f"\n## 4. {_t('推荐方案', 'Recommended Solution')}\n{report.recommended_solution}\n")
+        lines.append(f"## 5. {_t('推荐理由', 'Why This Solution')}\n{report.why_this_solution}\n")
+        lines.append(f"## 6. {_t('保留意见', 'Preserved Minority Opinions')}")
         for o in report.preserved_minority_opinions:
             lines.append(f"- {o}")
-        lines.append("\n## 7. 专家贡献")
+        lines.append(f"\n## 7. {_t('专家贡献', 'Agent Contributions')}")
         for agent, contrib in report.agent_contributions.items():
             lines.append(f"- **{agent}**: {contrib}")
-        lines.append("\n## 8. 最终评分")
+        lines.append(f"\n## 8. {_t('最终评分', 'Final Scores')}")
         for s in report.final_scores:
             lines.append(f"- **{s.agent_name}**: {s.contribution_score}/10 — {s.summary}")
         return "\n".join(lines)
