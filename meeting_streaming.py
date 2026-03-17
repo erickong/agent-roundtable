@@ -91,6 +91,7 @@ class StreamingMeeting:
 
         round1_messages = await self._run_expert_round(
             round_num=1,
+            topic=topic,
             coro_fn=lambda expert: expert.speak_round1(topic=topic, opening=opening_text),
         )
         self.messages.extend(round1_messages)
@@ -106,6 +107,7 @@ class StreamingMeeting:
 
         round2_messages = await self._run_expert_round(
             round_num=2,
+            topic=topic,
             coro_fn=lambda expert: expert.speak_round2(
                 topic=topic,
                 round1_summary=r1_formatted,
@@ -125,6 +127,7 @@ class StreamingMeeting:
 
         round3_messages = await self._run_expert_round(
             round_num=3,
+            topic=topic,
             coro_fn=lambda expert: expert.speak_round3(
                 topic=topic,
                 round2_summary=r2_formatted,
@@ -149,6 +152,7 @@ class StreamingMeeting:
 
             round4_messages = await self._run_expert_round(
                 round_num=4,
+                topic=topic,
                 coro_fn=lambda expert: expert.speak_round4(
                     topic=topic,
                     focused_issues=focused_issues,
@@ -199,7 +203,7 @@ class StreamingMeeting:
         await self._emit({"type": "meeting_end", "content": t(topic, "会议结束。", "Meeting ended.")})
         return final_report
 
-    async def _run_expert_round(self, round_num: int, coro_fn) -> List[AgentMessage]:
+    async def _run_expert_round(self, round_num: int, topic: str, coro_fn) -> List[AgentMessage]:
         """Run all experts in parallel, emitting events for each."""
         for expert in self.experts:
             await self._emit({
@@ -222,6 +226,15 @@ class StreamingMeeting:
                 })
                 continue
             messages.append(result)
+            # Emit search event if the expert used the search skill
+            if result.search_info:
+                await self._emit({
+                    "type": "agent_search",
+                    "agent": expert.name,
+                    "round": round_num,
+                    "query": result.search_info["query"],
+                    "result_count": result.search_info["result_count"],
+                })
             # Format content nicely
             if result.content:
                 content_str = json.dumps(result.content, ensure_ascii=False, indent=2)

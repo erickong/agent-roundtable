@@ -1,7 +1,7 @@
 """Agent interfaces for the Roundtable Meeting System V1."""
 
 import logging
-from typing import Any, Dict, Optional
+from typing import Any, Callable, Coroutine, Dict, Optional
 
 import httpx
 from openai import AsyncOpenAI
@@ -10,6 +10,7 @@ from config import LLMProviderConfig
 from models import AgentMessage, RoundScore, RoundSummary, FinalReport, FinalScore
 from parser import parse_json_response, safe_parse_agent_output
 from i18n import LANG_FOLLOW_INSTRUCTION
+from skills.web_search import SKILL_PROMPT as SEARCH_SKILL_PROMPT, SEARCH_REFINE_PROMPT
 from prompts import (
     MODERATOR_OPENING_PROMPT,
     MODERATOR_SUMMARY_PROMPT,
@@ -91,6 +92,9 @@ class BaseMeetingAgent:
 class ExpertAgent(BaseMeetingAgent):
     """An expert agent participating in the roundtable."""
 
+    # Async search callback: async (query: str) -> dict with 'summary', 'result_count'
+    search_fn: Optional[Callable[..., Coroutine]] = None
+
     def __init__(
         self,
         name: str,
@@ -111,6 +115,50 @@ class ExpertAgent(BaseMeetingAgent):
             + LANG_FOLLOW_INSTRUCTION
         )
 
+    @property
+    def _skill_prompt(self) -> str:
+        """Return skill prompt text if search is available, empty string otherwise."""
+        return SEARCH_SKILL_PROMPT if self.search_fn else ""
+
+    async def _speak_with_search(
+        self, prompt: str, expected_keys: list[str], round_index: int,
+    ) -> AgentMessage:
+        """Two-phase speak: LLM responds, optionally searches, then refines."""
+        raw = await self._call_llm(prompt)
+        content = safe_parse_agent_output(raw, expected_keys + ["search_query"])
+
+        search_info = None
+        search_query = content.pop("search_query", None) if isinstance(content, dict) else None
+
+        if search_query and self.search_fn:
+            try:
+                search_result = await self.search_fn(search_query)
+                search_info = {
+                    "query": search_query,
+                    "result_count": search_result.get("result_count", 0),
+                }
+                logger.info("[%s] Round %d search: '%s' → %d results",
+                            self.name, round_index, search_query, search_info["result_count"])
+                # Second pass: re-call LLM with search results
+                refine_suffix = SEARCH_REFINE_PROMPT.format(
+                    query=search_query, summary=search_result.get("summary", ""),
+                )
+                raw = await self._call_llm(prompt + refine_suffix)
+                content = safe_parse_agent_output(raw, expected_keys)
+                # Remove search_query from refined output if present
+                if isinstance(content, dict):
+                    content.pop("search_query", None)
+            except Exception as e:
+                logger.warning("[%s] Search failed for '%s': %s", self.name, search_query, e)
+
+        return AgentMessage(
+            round_index=round_index,
+            agent_name=self.name,
+            content=content,
+            raw_text=raw,
+            search_info=search_info,
+        )
+
     def retitle(self, title: str):
         title = title.strip()
         if not title or title == self.name:
@@ -124,13 +172,12 @@ class ExpertAgent(BaseMeetingAgent):
 
     async def speak_round1(self, topic: str, opening: str) -> AgentMessage:
         prompt = EXPERT_ROUND1_PROMPT.format(
-            role_label=self.role_label, topic=topic, opening=opening
+            role_label=self.role_label, topic=topic, opening=opening,
+            skill_prompt=self._skill_prompt,
         )
-        raw = await self._call_llm(prompt)
-        content = safe_parse_agent_output(
-            raw, ["core_position", "key_points", "main_risks", "initial_suggestion"]
+        return await self._speak_with_search(
+            prompt, ["core_position", "key_points", "main_risks", "initial_suggestion"], 1,
         )
-        return AgentMessage(round_index=1, agent_name=self.name, content=content, raw_text=raw)
 
     async def speak_round2(
         self, topic: str, round1_summary: str, moderator_summary: str
@@ -140,12 +187,11 @@ class ExpertAgent(BaseMeetingAgent):
             topic=topic,
             round1_summary=round1_summary,
             moderator_summary=moderator_summary,
+            skill_prompt=self._skill_prompt,
         )
-        raw = await self._call_llm(prompt)
-        content = safe_parse_agent_output(
-            raw, ["new_points", "attacks", "preserved_points"]
+        return await self._speak_with_search(
+            prompt, ["new_points", "attacks", "preserved_points"], 2,
         )
-        return AgentMessage(round_index=2, agent_name=self.name, content=content, raw_text=raw)
 
     async def speak_round3(
         self,
@@ -161,19 +207,14 @@ class ExpertAgent(BaseMeetingAgent):
             moderator_summary=moderator_summary,
             agent_name=self.name,
             attacks_on_me=attacks_on_me,
+            skill_prompt=self._skill_prompt,
         )
-        raw = await self._call_llm(prompt)
-        content = safe_parse_agent_output(
-            raw,
-            [
-                "strongest_attack_on_me",
-                "accepted_criticisms",
-                "revisions",
-                "final_position",
-                "preferred_solution",
-            ],
+        return await self._speak_with_search(
+            prompt,
+            ["strongest_attack_on_me", "accepted_criticisms", "revisions",
+             "final_position", "preferred_solution"],
+            3,
         )
-        return AgentMessage(round_index=3, agent_name=self.name, content=content, raw_text=raw)
 
     async def speak_round4(
         self, topic: str, focused_issues: str, compressed_summary: str
@@ -183,13 +224,13 @@ class ExpertAgent(BaseMeetingAgent):
             topic=topic,
             focused_issues=focused_issues,
             compressed_summary=compressed_summary,
+            skill_prompt=self._skill_prompt,
         )
-        raw = await self._call_llm(prompt)
-        content = safe_parse_agent_output(
-            raw,
+        return await self._speak_with_search(
+            prompt,
             ["focused_issue", "final_addition", "last_attack_or_defense", "closing_view"],
+            4,
         )
-        return AgentMessage(round_index=4, agent_name=self.name, content=content, raw_text=raw)
 
 
 class ModeratorAgent(BaseMeetingAgent):

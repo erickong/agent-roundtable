@@ -731,6 +731,18 @@ function createMsgElement(msg) {
     return div;
   }
 
+  if (msg.type === 'agent_search') {
+    div.className = 'msg';
+    const color = getAgentColor(msg.agent);
+    div.innerHTML = `
+      <div class="avatar" style="background:${color}">${getAgentInitial(msg.agent)}</div>
+      <div class="bubble" style="background:var(--bubble-system);border-left:3px solid ${color}">
+        <div class="sender-name">${escapeHtml(msg.agent)} · 🔍 Search</div>
+        <div class="msg-content" style="font-size:0.92em;color:#555">"${escapeHtml(msg.query)}" → ${msg.result_count} results</div>
+      </div>`;
+    return div;
+  }
+
   if (msg.type === 'agent_message' || msg.type === 'moderator_summary' || msg.type === 'final_report' || msg.type === 'agent_error') {
     const isMod = msg.agent === 'Moderator';
     const isFinal = msg.type === 'final_report';

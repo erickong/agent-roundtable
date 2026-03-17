@@ -9,6 +9,7 @@ from models import MeetingInput
 from agents import ModeratorAgent, ExpertAgent
 from meeting import RoundtableMeeting
 from i18n import t, get_default_experts, LANG_FOLLOW_INSTRUCTION
+from skills.web_search import execute as skill_web_search, is_available as skill_search_available
 
 logging.basicConfig(
     level=logging.INFO,
@@ -187,6 +188,11 @@ async def run_meeting(
         )
         for cfg in configs
     ]
+
+    # Enable search skill on experts if search is enabled and available
+    if search_enabled and skill_search_available():
+        for expert in experts:
+            expert.search_fn = skill_web_search
 
     for expert in experts:
         logger.info(

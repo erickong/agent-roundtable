@@ -44,12 +44,13 @@ EXPERT_ROUND1_PROMPT = """\
 
 请以如下 JSON 格式输出（不要输出其他文字）：
 {{
+  "search_query": "可选：搜索关键词",
   "core_position": "你的核心主张",
   "key_points": ["观点1", "观点2"],
   "main_risks": ["风险1"],
   "initial_suggestion": "你的初步建议"
 }}
-
+{skill_prompt}
 议题：{topic}
 Moderator 开场：
 {opening}
@@ -70,6 +71,7 @@ EXPERT_ROUND2_PROMPT = """\
 
 请以如下 JSON 格式输出（不要输出其他文字）：
 {{
+  "search_query": "可选：搜索关键词",
   "new_points": ["新观点1", "新观点2"],
   "attacks": [
     {{
@@ -86,7 +88,7 @@ EXPERT_ROUND2_PROMPT = """\
     }}
   ]
 }}
-
+{skill_prompt}
 议题：{topic}
 
 第一轮各专家发言摘要：
@@ -112,13 +114,14 @@ EXPERT_ROUND3_PROMPT = """\
 
 请以如下 JSON 格式输出（不要输出其他文字）：
 {{
+  "search_query": "可选：搜索关键词",
   "strongest_attack_on_me": "别人对我最有力的攻击",
   "accepted_criticisms": ["接受的批评1"],
   "revisions": ["修正内容1"],
   "final_position": "最终保留的核心主张",
   "preferred_solution": "支持的最终方案倾向"
 }}
-
+{skill_prompt}
 议题：{topic}
 
 第二轮各专家发言摘要：
@@ -141,12 +144,13 @@ EXPERT_ROUND4_PROMPT = """\
 
 请以如下 JSON 格式输出（不要输出其他文字）：
 {{
+  "search_query": "可选：搜索关键词",
   "focused_issue": "你聚焦的问题",
   "final_addition": "你的补充观点",
   "last_attack_or_defense": "最后的攻击或辩护",
   "closing_view": "收尾观点"
 }}
-
+{skill_prompt}
 议题：{topic}
 
 前三轮高度压缩总结：

@@ -15,6 +15,7 @@ from agents import ModeratorAgent, ExpertAgent
 from meeting_streaming import StreamingMeeting
 from i18n import t, get_default_experts, is_chinese, LANG_FOLLOW_INSTRUCTION
 from search import get_search_api_url, tavily_search
+from skills.web_search import execute as skill_web_search, is_available as skill_search_available
 
 from openai import AsyncOpenAI
 
@@ -268,6 +269,11 @@ async def _run_meeting_task(
             )
             for cfg in DEFAULT_EXPERTS(topic)
         ]
+
+        # Enable search skill on experts if a search backend is configured
+        if search_enabled and skill_search_available():
+            for expert in experts:
+                expert.search_fn = skill_web_search
 
         meeting = StreamingMeeting(
             moderator=moderator,
