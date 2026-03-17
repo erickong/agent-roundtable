@@ -172,7 +172,7 @@ async def _research_phase(
         # Ask moderator to generate a search query
         _t = lambda zh, en: t(topic, zh, en)
         prompt = (
-            f"{_t('你是圆桌会议的仲裁者。你需要为即将讨论的议题搜索背景信息。', 'You are the moderator of a roundtable meeting. You need to search for background information on the upcoming topic.')}\n\n"
+            f"{_t('你是圆桌会议的仲裁者。你需要为即将讨论的议题通过新闻数据库搜索背景信息。', 'You are the moderator of a roundtable meeting. You need to search a news database for background information on the upcoming topic.')}\n\n"
             f"{_t('议题', 'Topic')}：{topic}\n"
         )
         if existing_background:
@@ -186,14 +186,14 @@ async def _research_phase(
             f"\n{_t(f'这是第 {i + 1}/{MAX_SEARCH_ROUNDS} 次搜索机会。', f'This is search opportunity {i + 1}/{MAX_SEARCH_ROUNDS}.')}"
             f"{_t('请判断是否还需要搜索更多信息。', 'Please decide whether more searching is needed.')}\n"
             f"{_t('如果信息已经足够充分，回复：DONE', 'If information is sufficient, reply: DONE')}\n"
-            f"{_t('如果还需搜索，回复一个简短的搜索关键词（不要回复其他内容，只回复关键词）。', 'If more search is needed, reply with a short search keyword only (no other text).')}"
+            f"{_t('如果还需搜索，回复一个精简的搜索关键词（1-3个词，像查数据库一样简短，例如：A股、港股、芯片、关税、新能源）。不要回复其他内容，不要写完整句子。', 'If more search is needed, reply with 1-3 short keywords (like a database search, e.g.: stocks, tariffs, chips, oil). No other text, no full sentences.')}"
         )
 
         try:
             resp = await moderator_client.chat.completions.create(
                 model=model,
                 messages=[
-                    {"role": "system", "content": t(topic, "你是圆桌会议的研究助手。根据议题判断是否需要搜索，并生成精准的搜索关键词。", "You are a roundtable meeting research assistant. Decide whether to search and generate precise search keywords based on the topic.")},
+                    {"role": "system", "content": t(topic, "你是新闻数据库搜索助手。你的任务是将议题拆解为多个简短搜索词（每次1-3个词），逐次搜索新闻数据库。注意：这不是谷歌搜索引擎，不能输入长句子，必须用精简关键词。每次只回复一个搜索词或DONE。", "You are a news database search assistant. Break topics into short keywords (1-3 words each) for sequential database searches. This is NOT a web search engine — long sentences won't work. Reply with one short keyword or DONE.")},
                     {"role": "user", "content": prompt},
                 ],
                 temperature=0.3,

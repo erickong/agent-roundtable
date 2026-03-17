@@ -35,6 +35,7 @@ async def tavily_search(
     max_results: int = 10,
     search_depth: str = "advanced",
     topic: str = "general",
+    days: int = 3,
     api_key: Optional[str] = None,
 ) -> dict:
     """Search using Tavily-compatible API.
@@ -44,6 +45,7 @@ async def tavily_search(
         max_results: Maximum number of results (default 10).
         search_depth: "basic" or "advanced" (default "advanced").
         topic: "general" or "news" (default "general").
+        days: Search within the last N days (default 3).
         api_key: Tavily API key. Falls back to TAVILY_API_KEY env var.
 
     Returns:
@@ -58,6 +60,7 @@ async def tavily_search(
         "max_results": max_results,
         "search_depth": search_depth,
         "topic": topic,
+        "days": days,
         "include_answer": True,
     }
 
